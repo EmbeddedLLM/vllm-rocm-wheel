@@ -21,9 +21,8 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    runs-on: 
-      group: AMDInternal
-      labels: [self-hosted, ellm043]
+    runs-on:
+      labels: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -87,9 +86,8 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    runs-on: 
-      group: AMDInternal
-      labels: [self-hosted, ellm043]
+    runs-on:
+      labels: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
