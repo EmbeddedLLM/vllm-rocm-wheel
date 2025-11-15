@@ -22,8 +22,16 @@ on:
         options:
           - 'false'
           - 'true'
+      skip_to_job4:
+        description: 'Skip to Job 4 only: skip all builds, only publish (requires previous_run_id)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
       previous_run_id:
-        description: 'Run ID to reuse artifacts from (required if debug_mode=true)'
+        description: 'Run ID to reuse artifacts from (required if debug_mode or skip_to_job4 is true)'
         required: false
         default: ''
 permissions:
@@ -33,7 +41,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    if: github.event.inputs.debug_mode != 'true'
+    if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
     runs-on:
       labels: self-hosted
     steps:
@@ -86,7 +94,7 @@ jobs:
           retention-days: 7
   collect-dependency-wheels:
     name: Collect Dependency Wheels from PyPI
-    if: github.event.inputs.debug_mode != 'true'
+    if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -120,7 +128,7 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    if: always() && (needs.build-base-wheels.result == 'success' || github.event.inputs.debug_mode == 'true')
+    if: always() && github.event.inputs.skip_to_job4 != 'true' && (needs.build-base-wheels.result == 'success' || github.event.inputs.debug_mode == 'true')
     runs-on:
       labels: self-hosted
     steps:
@@ -177,23 +185,38 @@ jobs:
   create-pypi-repository:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, collect-dependency-wheels, build-vllm-wheel]
-    if: always() && needs.build-vllm-wheel.result == 'success' && (github.event.inputs.debug_mode != 'true' || (needs.build-base-wheels.result == 'skipped' && needs.collect-dependency-wheels.result == 'skipped'))
+    if: always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true') && (github.event.inputs.debug_mode != 'true' || github.event.inputs.skip_to_job4 == 'true' || (needs.build-base-wheels.result == 'skipped' && needs.collect-dependency-wheels.result == 'skipped'))
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+
+      - name: Try to checkout gh-pages branch
+        id: checkout_gh_pages
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
 
+      - name: Create gh-pages directory if branch doesn't exist
+        if: steps.checkout_gh_pages.outcome == 'failure'
+        run: |
+          mkdir -p gh-pages
+          cd gh-pages
+          git init
+          git checkout -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Download all artifacts (normal mode)
-        if: github.event.inputs.debug_mode != 'true'
+        if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Download all artifacts (debug mode - from previous run + current)
-        if: github.event.inputs.debug_mode == 'true'
+        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -201,11 +224,19 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download vLLM wheel from current run (debug mode)
-        if: github.event.inputs.debug_mode == 'true'
+        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel
+
+      - name: Download all artifacts (skip to job 4 mode - from previous run only)
+        if: github.event.inputs.skip_to_job4 == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ github.event.inputs.previous_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
