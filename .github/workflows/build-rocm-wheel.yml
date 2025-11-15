@@ -14,6 +14,18 @@ on:
         description: 'ROCm version'
         required: false
         default: '7.1'
+      debug_mode:
+        description: 'Debug mode: skip Jobs 1&2, reuse artifacts from previous run'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      previous_run_id:
+        description: 'Run ID to reuse artifacts from (required if debug_mode=true)'
+        required: false
+        default: ''
 permissions:
   contents: write
   pages: write
@@ -21,6 +33,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
+    if: github.event.inputs.debug_mode != 'true'
     runs-on:
       labels: self-hosted
     steps:
@@ -73,6 +86,7 @@ jobs:
           retention-days: 7
   collect-dependency-wheels:
     name: Collect Dependency Wheels from PyPI
+    if: github.event.inputs.debug_mode != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -106,36 +120,43 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
+    if: always() && (needs.build-base-wheels.result == 'success' || github.event.inputs.debug_mode == 'true')
     runs-on:
       labels: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Download base Docker image
+
+      - name: Download base Docker image (normal mode)
+        if: github.event.inputs.debug_mode != 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-image
           path: artifacts/docker-image
+
+      - name: Download base Docker image (debug mode - from previous run)
+        if: github.event.inputs.debug_mode == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-base-image
+          path: artifacts/docker-image
+          run-id: ${{ github.event.inputs.previous_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Load base Docker image
         run: |
           gunzip -c artifacts/docker-image/rocm-base-image.tar.gz | docker load
           docker images rocm/vllm-dev:base
-      - name: Build vLLM wheel using Dockerfile.rocm
+      - name: Build and extract vLLM wheel using Dockerfile.rocm
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --file docker/Dockerfile.rocm \
-            --tag vllm-rocm:export \
             --target export_vllm \
+            --output type=local,dest=dist \
             --build-arg BASE_IMAGE=rocm/vllm-dev:base \
             --build-arg ARG_PYTORCH_ROCM_ARCH=${{ github.event.inputs.pytorch_rocm_arch }} \
             --build-arg REMOTE_VLLM=0 \
             .
-      - name: Extract vLLM wheel from Docker image
-        run: |
-          mkdir -p dist
-          container_id=$(docker create vllm-rocm:export)
-          docker cp ${container_id}:/ dist/
-          docker rm ${container_id}
+          ls -lh dist/
           ls -lh dist/*.whl
       - name: Install auditwheel and repair wheel
         run: |
@@ -156,6 +177,7 @@ jobs:
   create-pypi-repository:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, collect-dependency-wheels, build-vllm-wheel]
+    if: always() && needs.build-vllm-wheel.result == 'success' && (github.event.inputs.debug_mode != 'true' || (needs.build-base-wheels.result == 'skipped' && needs.collect-dependency-wheels.result == 'skipped'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -163,10 +185,27 @@ jobs:
         with:
           ref: gh-pages
           path: gh-pages
-      - name: Download all artifacts
+
+      - name: Download all artifacts (normal mode)
+        if: github.event.inputs.debug_mode != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Download all artifacts (debug mode - from previous run + current)
+        if: github.event.inputs.debug_mode == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ github.event.inputs.previous_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download vLLM wheel from current run (debug mode)
+        if: github.event.inputs.debug_mode == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: vllm-wheel
+          path: artifacts/vllm-wheel
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
