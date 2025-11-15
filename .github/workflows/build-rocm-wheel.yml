@@ -21,7 +21,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    runs-on: ellm043
+    runs-on: soho1u
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    runs-on: ubuntu-latest
+    runs-on: soho1u
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
