@@ -112,13 +112,45 @@ jobs:
           python .github/scripts/download_dependency_wheels.py \
             --requirements requirements/rocm.txt \
             --output-dir artifacts/dependency-wheels \
-            --python-version ${{ github.event.inputs.python_version }}
+            --python-version ${{ github.event.inputs.python_version }} \
+            --max-versions 5
       - name: List downloaded wheels
         run: |
           echo "Downloaded wheels:"
           ls -lh artifacts/dependency-wheels/
           echo "Total size:"
           du -sh artifacts/dependency-wheels/
+          echo "Total count: $(ls artifacts/dependency-wheels/*.whl 2>/dev/null | wc -l) wheels"
+
+      - name: Validate critical dependencies
+        run: |
+          WHEEL_COUNT=$(ls artifacts/dependency-wheels/*.whl 2>/dev/null | wc -l)
+          echo "Downloaded $WHEEL_COUNT wheels"
+
+          if [ "$WHEEL_COUNT" -lt 40 ]; then
+            echo "::error::Too few wheels downloaded ($WHEEL_COUNT). Expected at least 40."
+            echo "::error::Check the download logs above for failures."
+            exit 1
+          fi
+
+          # Check for specific critical packages
+          CRITICAL_PKGS="regex numpy transformers tokenizers protobuf pydantic aiohttp requests tqdm fastapi"
+          MISSING=""
+
+          for pkg in $CRITICAL_PKGS; do
+            if ! ls artifacts/dependency-wheels/${pkg}-*.whl 2>/dev/null | grep -q .; then
+              MISSING="$MISSING $pkg"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing critical packages:$MISSING"
+            echo "::error::These packages are required for vllm to function properly."
+            exit 1
+          fi
+
+          echo "✅ All critical packages present!"
+
       - name: Upload dependency wheels
         uses: actions/upload-artifact@v4
         with:

@@ -34,7 +34,12 @@ def parse_requirements_file(filepath: Path) -> list[str]:
                 included_file = filepath.parent / line[3:].strip()
                 requirements.extend(parse_requirements_file(included_file))
             else:
-                requirements.append(line)
+                # Strip inline comments (everything after # that's not in quotes)
+                # Simple approach: split on # and take first part
+                if '#' in line:
+                    line = line.split('#')[0].strip()
+                if line:  # Only add if something remains after stripping
+                    requirements.append(line)
 
     return requirements
 
@@ -123,19 +128,29 @@ def download_wheels(
 
         try:
             # Use pip download with specific Python version
+            # Try to get binary wheels first, but allow source builds as fallback
             cmd = [
                 sys.executable,
                 "-m",
                 "pip",
                 "download",
-                "--only-binary=:all:",
+                "--prefer-binary",
                 "--no-deps",
                 "--dest",
                 str(output_dir),
                 "--python-version",
                 python_version,
+                # Multiple platform tags to catch more pre-built wheels
+                "--platform",
+                "linux_x86_64",
+                "--platform",
+                "manylinux1_x86_64",
+                "--platform",
+                "manylinux2010_x86_64",
                 "--platform",
                 "manylinux2014_x86_64",
+                "--platform",
+                "manylinux_2_17_x86_64",
                 "--platform",
                 "manylinux_2_28_x86_64",
                 "--platform",
@@ -270,6 +285,36 @@ def main():
     print(f"\n{'=' * 60}")
     print(f"Downloaded {len(wheels)} wheels to {args.output_dir}")
     print(f"{'=' * 60}")
+
+    # Validate critical packages were downloaded
+    CRITICAL_PACKAGES = {
+        'regex', 'numpy', 'transformers', 'tokenizers', 'protobuf',
+        'pydantic', 'aiohttp', 'requests', 'tqdm', 'fastapi',
+        'typing-extensions', 'packaging', 'pyyaml'
+    }
+
+    # Get set of downloaded package names (normalized)
+    downloaded_packages = set()
+    for wheel in wheels:
+        # Extract package name from wheel filename (before first hyphen or underscore followed by version)
+        name = wheel.stem.split('-')[0].lower().replace('_', '-')
+        downloaded_packages.add(name)
+
+    # Check for missing critical packages
+    missing_critical = CRITICAL_PACKAGES - downloaded_packages
+
+    if missing_critical:
+        print(f"\n{'=' * 60}")
+        print("ERROR: Missing critical packages!")
+        print(f"{'=' * 60}")
+        for pkg in sorted(missing_critical):
+            print(f"  - {pkg}")
+        print(f"\nDownloaded packages: {sorted(downloaded_packages)}")
+        print("\nPlease check the download logs above for errors.")
+        print("These packages are required for vllm to function properly.")
+        sys.exit(1)
+
+    print(f"\n✅ All critical packages downloaded successfully!")
 
 
 if __name__ == "__main__":
