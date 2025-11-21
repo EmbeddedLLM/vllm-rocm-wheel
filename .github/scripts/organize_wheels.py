@@ -8,6 +8,7 @@ Script to organize wheels by size for GitHub Pages (<100MB) and GitHub Releases 
 import os
 import sys
 import shutil
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -71,64 +72,113 @@ if total == 0:
     print(f"\nERROR: Cannot proceed without any wheels!", file=sys.stderr)
     sys.exit(1)
 
-print(f"Found {total} wheels to process\n")
+print(f"Found {total} wheels to process")
 
-# Copy and separate in one pass
+# Check disk space
+total_wheel_size = sum(w.stat().st_size for w in all_wheels)
+stat = shutil.disk_usage(".")
+free_gb = stat.free / (1024**3)
+needed_gb = total_wheel_size / (1024**3) * 1.5  # 1.5x for safety margin
+
+print(f"\nDisk Space Check:")
+print(f"  Total wheel size: {total_wheel_size/(1024**3):.2f} GB")
+print(f"  Available space: {free_gb:.2f} GB")
+print(f"  Estimated needed: {needed_gb:.2f} GB")
+
+if free_gb < needed_gb:
+    print(f"\nERROR: Insufficient disk space!", file=sys.stderr)
+    print(f"Need {needed_gb:.2f}GB but only {free_gb:.2f}GB available", file=sys.stderr)
+    sys.exit(1)
+
+print("Disk space check: OK\n")
+
+# Copy and separate wheels (OPTIMIZED - single pass, no redundant copies)
+print(f"{'='*70}")
+print("Processing and copying wheels...")
+print(f"{'='*70}\n")
+
 large_count = 0
 small_count = 0
 large_total_size = 0
 small_total_size = 0
+start_time = time.time()
+last_progress_time = start_time
 
 for i, wheel in enumerate(all_wheels, 1):
     try:
         size = wheel.stat().st_size
+        size_mb = size / (1024*1024)
 
-        # Determine target directory
+        # Determine destination(s) and copy
         if size > SIZE_LIMIT:
-            target_dir = large_dir
+            # Large wheels: only to packages-large/ (for GitHub Releases)
+            shutil.copy2(wheel, large_dir / wheel.name)
             large_count += 1
             large_total_size += size
+            destination = "packages-large/"
         else:
-            target_dir = small_dir
+            # Small wheels: to BOTH packages/ (for GitHub Pages) AND packages-small/ (staging)
+            # Copy to both in single operation to avoid redundant second loop
+            shutil.copy2(wheel, packages_dir / wheel.name)
+            shutil.copy2(wheel, small_dir / wheel.name)
             small_count += 1
             small_total_size += size
+            destination = "packages/ + packages-small/"
 
-        # Copy to target
-        shutil.copy2(wheel, target_dir / wheel.name)
+        # Enhanced progress indicator
+        current_time = time.time()
+        elapsed = current_time - start_time
+        time_since_last = current_time - last_progress_time
 
-        # Progress indicator
-        if i % 50 == 0 or i == total:
+        # Show progress for: every 10 wheels, large files, last wheel, or every 30 seconds
+        show_progress = (
+            i % 10 == 0 or
+            i == total or
+            size > SIZE_LIMIT or
+            time_since_last > 30
+        )
+
+        if show_progress:
+            rate = i / elapsed if elapsed > 0 else 0
+            eta_seconds = (total - i) / rate if rate > 0 else 0
             pct = i * 100 // total
-            print(f"Progress: {i}/{total} wheels ({pct}%)")
+
+            # Truncate filename if too long
+            display_name = wheel.name[:50] + "..." if len(wheel.name) > 53 else wheel.name
+
+            print(f"[{elapsed:.0f}s] {i}/{total} ({pct}%) | "
+                  f"{display_name} ({size_mb:.1f}MB) -> {destination} | "
+                  f"Rate: {rate:.2f}/s | ETA: {eta_seconds:.0f}s")
+
+            last_progress_time = current_time
 
     except Exception as e:
         print(f"WARNING: Failed to process {wheel.name}: {e}", file=sys.stderr)
 
-# Copy small wheels to packages/ for GitHub Pages
-print(f"\nCopying {small_count} small wheels to packages directory...")
-for wheel in small_dir.glob("*.whl"):
-    shutil.copy2(wheel, packages_dir / wheel.name)
+total_time = time.time() - start_time
 
 # Summary
 print(f"\n{'='*70}")
 print(f"Wheel Organization Complete!")
 print(f"{'='*70}")
-print(f"Total wheels: {total}")
+print(f"Total wheels processed: {total}")
 print(f"  Large wheels (>100MB): {large_count} -> GitHub Releases ({large_total_size/(1024**3):.2f} GB)")
 print(f"  Small wheels (<100MB): {small_count} -> GitHub Pages ({small_total_size/(1024**2):.1f} MB)")
+print(f"Total processing time: {total_time:.1f} seconds")
+print(f"Average rate: {total/total_time:.2f} wheels/second")
 print(f"{'='*70}\n")
 
 # List examples
 large_wheels = sorted(large_dir.glob("*.whl"), key=lambda x: x.stat().st_size, reverse=True)
 if large_wheels:
-    print(f"Large wheels (showing {min(5, len(large_wheels))} of {len(large_wheels)}):")
+    print(f"Largest wheels (showing {min(5, len(large_wheels))} of {len(large_wheels)}):")
     for w in large_wheels[:5]:
         size_mb = w.stat().st_size / (1024*1024)
         print(f"  - {w.name} ({size_mb:.1f} MB)")
 
 small_sample = list(small_dir.glob("*.whl"))[:5]
 if small_sample:
-    print(f"\nSmall wheels (showing 5 of {small_count}):")
+    print(f"\nSmall wheels sample (showing 5 of {small_count}):")
     for w in small_sample:
         size_mb = w.stat().st_size / (1024*1024)
         print(f"  - {w.name} ({size_mb:.1f} MB)")

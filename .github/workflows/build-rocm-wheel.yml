@@ -305,6 +305,7 @@ jobs:
 
       - name: Organize and separate wheels by size
         id: separate_wheels
+        timeout-minutes: 30
         run: python3 .github/scripts/organize_wheels.py
 
       - name: Create GitHub Release for large wheels
