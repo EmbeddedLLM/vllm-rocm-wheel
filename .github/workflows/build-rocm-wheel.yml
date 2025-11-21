@@ -267,6 +267,42 @@ jobs:
       - name: Install dumb-pypi
         run: |
           pip install dumb-pypi
+
+      - name: Debug artifacts structure
+        run: |
+          echo "Current directory: $(pwd)"
+          echo ""
+          echo "Contents of current directory:"
+          ls -la
+          echo ""
+          echo "Checking for artifacts directory:"
+          if [ -d "artifacts" ]; then
+            echo "✓ artifacts/ directory exists"
+            echo ""
+            echo "Contents of artifacts/:"
+            ls -laR artifacts/
+            echo ""
+            echo "Searching for wheel files..."
+            find artifacts -name "*.whl" -type f
+            echo ""
+            WHEEL_COUNT=$(find artifacts -name "*.whl" -type f | wc -l)
+            echo "Total wheels found: $WHEEL_COUNT"
+            if [ "$WHEEL_COUNT" -eq 0 ]; then
+              echo "ERROR: No wheels found in artifacts directory!"
+              exit 1
+            fi
+          else
+            echo "✗ ERROR: artifacts/ directory NOT FOUND!"
+            echo "This will cause organize_wheels.py to fail!"
+            exit 1
+          fi
+          echo ""
+          echo "GITHUB_OUTPUT is set to: ${GITHUB_OUTPUT}"
+          if [ -z "$GITHUB_OUTPUT" ]; then
+            echo "ERROR: GITHUB_OUTPUT is not set!"
+            exit 1
+          fi
+
       - name: Organize and separate wheels by size
         id: separate_wheels
         run: python3 .github/scripts/organize_wheels.py
