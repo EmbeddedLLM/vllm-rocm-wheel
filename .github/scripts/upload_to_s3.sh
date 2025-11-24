@@ -154,12 +154,13 @@ echo ""
 
 # Upload index with different cache settings
 # Index files should not be cached aggressively as they may update
-aws s3 sync "$INDEX_DIR/" "s3://$S3_BUCKET/simple/" \
+aws s3 sync "$INDEX_DIR/" "s3://$S3_BUCKET/" \
     --region "$AWS_REGION" \
     --content-type "text/html" \
     --cache-control "no-cache, no-store, must-revalidate" \
     --size-only \
-    --delete
+    --delete \
+    --exclude "packages/*"
 
 if [ $? -eq 0 ]; then
     log_success "Index uploaded successfully"
