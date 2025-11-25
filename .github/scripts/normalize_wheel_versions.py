@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
-Script to normalize wheel filenames by removing local version identifiers.
+Script to normalize wheel filenames by removing local version identifiers and pre-release identifiers.
 
-This strips +git{commit} and similar suffixes to make versions appear as stable releases.
-Example: torch-2.9.0+git1c57644d-cp312-linux_x86_64.whl
+This strips +git{commit} suffixes and pre-release identifiers (a0, b1, rc2, etc.) to make
+versions appear as stable releases.
+Example: torch-2.9.0a0+git1c57644d-cp312-linux_x86_64.whl
       -> torch-2.9.0-cp312-linux_x86_64.whl
 
-This is necessary because local version identifiers:
-1. Make packages look unofficial/developmental
-2. May cause pip resolution issues
-3. Are not allowed on PyPI.org
+This is necessary because:
+1. Local version identifiers make packages look unofficial/developmental
+2. Pre-release versions may not be installed by pip by default
+3. For private repositories, we want to treat builds as stable releases
 
 The transformation is done via simple file renaming, which is safe because:
 - The wheel's internal metadata is not checked during installation from a custom index
@@ -26,12 +27,14 @@ from pathlib import Path
 
 def normalize_wheel_filename(wheel_path: Path) -> Path:
     """
-    Remove local version identifier from wheel filename.
+    Remove local version identifier and pre-release identifier from wheel filename.
 
     Wheel filename format (PEP 427):
     {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
 
-    We need to remove the local version identifier (the +local part) from the version.
+    Normalizations performed:
+    1. Remove local version identifier (the +local part): 2.9.0+git123 -> 2.9.0
+    2. Remove pre-release identifier (a/b/rc): 2.9.0a0 -> 2.9.0
 
     Args:
         wheel_path: Path to the wheel file
@@ -59,16 +62,19 @@ def normalize_wheel_filename(wheel_path: Path) -> Path:
     version = parts[1]
     rest = '-'.join(parts[2:])  # python tag, abi, platform
 
-    # Check if version has local identifier (contains +)
-    if '+' not in version:
-        # No local version, nothing to normalize
-        return wheel_path
-
-    # Remove the local version identifier
+    # Remove the local version identifier (if present)
     base_version = version.split('+')[0]
 
+    # Remove pre-release identifiers (a0, b1, rc2, etc.)
+    normalized_version = re.sub(r'(a|b|rc)\d+$', '', base_version)
+
+    # Check if any normalization was done
+    if normalized_version == version:
+        # No change needed
+        return wheel_path
+
     # Construct new filename
-    new_filename = f"{distribution}-{base_version}-{rest}"
+    new_filename = f"{distribution}-{normalized_version}-{rest}"
     new_path = wheel_path.parent / new_filename
 
     return new_path
@@ -140,7 +146,7 @@ def normalize_wheels_in_directory(directory: Path, dry_run: bool = False) -> dic
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Normalize wheel filenames by removing local version identifiers"
+        description="Normalize wheel filenames by removing local version identifiers and pre-release identifiers"
     )
     parser.add_argument(
         "directory",
