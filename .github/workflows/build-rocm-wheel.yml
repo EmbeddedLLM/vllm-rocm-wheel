@@ -382,8 +382,8 @@ jobs:
         run: |
           echo "Generating PyPI index for S3..."
 
-          # Set S3 URL
-          S3_URL="https://${{ secrets.AWS_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com"
+          # Set S3 URL (website endpoint for directory index support)
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
 
           echo "S3 URL: $S3_URL"
 
@@ -422,7 +422,7 @@ jobs:
 
       - name: Summary
         run: |
-          S3_URL="https://${{ secrets.AWS_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com"
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
           WHEEL_COUNT=$(ls all-wheels/*.whl 2>/dev/null | wc -l)
 
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
