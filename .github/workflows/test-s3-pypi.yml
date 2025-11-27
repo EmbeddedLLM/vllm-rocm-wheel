@@ -1,0 +1,218 @@
+name: Test S3 PyPI Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_package:
+        description: 'Package to test with (e.g., requests, flask, numpy)'
+        required: false
+        default: 'requests'
+      python_version:
+        description: 'Python version'
+        required: false
+        default: '3.12'
+
+jobs:
+  test-s3-pypi:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ github.event.inputs.python_version || '3.12' }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install packaging
+
+      - name: Download test package and dependencies
+        run: |
+          TEST_PACKAGE="${{ github.event.inputs.test_package || 'requests' }}"
+
+          echo "📦 Downloading $TEST_PACKAGE and its dependencies..."
+          mkdir -p test-wheels
+
+          # Download the package and all its dependencies
+          pip download "$TEST_PACKAGE" \
+            --dest test-wheels \
+            --python-version ${{ github.event.inputs.python_version || '3.12' }} \
+            --platform manylinux2014_x86_64 \
+            --only-binary=:all:
+
+          echo ""
+          echo "Downloaded wheels:"
+          ls -lh test-wheels/
+          echo ""
+          echo "Total wheels: $(ls test-wheels/*.whl 2>/dev/null | wc -l)"
+
+      - name: Generate PyPI index
+        run: |
+          echo "🔨 Generating PyPI index..."
+
+          # Use the website endpoint URL
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          python3 .github/scripts/generate_s3_index.py \
+            --wheels-dir test-wheels \
+            --output-dir test-index \
+            --s3-url "$S3_URL" \
+            --no-metadata \
+            --rocm-version "N/A" \
+            --python-version "${{ github.event.inputs.python_version || '3.12' }}" \
+            --gpu-arch "Test" \
+            --vllm-version "Test Repository"
+
+          echo ""
+          echo "Generated index structure:"
+          tree -L 3 test-index/ || find test-index/ -type f
+
+          echo ""
+          echo "Sample package index:"
+          TEST_PACKAGE="${{ github.event.inputs.test_package || 'requests' }}"
+          NORMALIZED_NAME=$(echo "$TEST_PACKAGE" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+          if [ -f "test-index/simple/$NORMALIZED_NAME/index.html" ]; then
+            echo "=== test-index/simple/$NORMALIZED_NAME/index.html ==="
+            cat "test-index/simple/$NORMALIZED_NAME/index.html"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload to S3 (test prefix)
+        run: |
+          echo "☁️  Uploading to S3 with 'test/' prefix..."
+
+          # Upload wheels to test/packages/
+          echo "Uploading wheels..."
+          aws s3 sync test-wheels/ "s3://${{ secrets.AWS_S3_BUCKET }}/test/packages/" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --content-type "application/octet-stream" \
+            --cache-control "public, max-age=31536000" \
+            --size-only \
+            --exclude "*" \
+            --include "*.whl"
+
+          # Upload index to test/ (root of test prefix)
+          echo "Uploading index..."
+          aws s3 sync test-index/ "s3://${{ secrets.AWS_S3_BUCKET }}/test/" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --content-type "text/html" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --size-only \
+            --delete \
+            --exclude "packages/*"
+
+          echo "✅ Upload complete"
+
+      - name: Verify S3 structure
+        run: |
+          echo "🔍 Verifying S3 structure..."
+
+          TEST_PACKAGE="${{ github.event.inputs.test_package || 'requests' }}"
+          NORMALIZED_NAME=$(echo "$TEST_PACKAGE" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          echo ""
+          echo "Testing URLs:"
+          echo "  Main index: $S3_URL/test/simple/"
+          echo "  Package index: $S3_URL/test/simple/$NORMALIZED_NAME/"
+          echo ""
+
+          # Test main index
+          echo "1. Checking main index..."
+          curl -f "$S3_URL/test/simple/index.html" > /tmp/main-index.html
+          if grep -q "$NORMALIZED_NAME" /tmp/main-index.html; then
+            echo "   ✅ Main index contains $NORMALIZED_NAME"
+          else
+            echo "   ❌ Main index does NOT contain $NORMALIZED_NAME"
+            exit 1
+          fi
+
+          # Test package index
+          echo "2. Checking package index..."
+          curl -f "$S3_URL/test/simple/$NORMALIZED_NAME/index.html" > /tmp/pkg-index.html
+          echo "   Package index contents:"
+          cat /tmp/pkg-index.html
+
+          # Check for data-dist-info-metadata (should NOT be present)
+          if grep -q "data-dist-info-metadata" /tmp/pkg-index.html; then
+            echo "   ⚠️  WARNING: data-dist-info-metadata still present (--no-metadata not working)"
+          else
+            echo "   ✅ No data-dist-info-metadata attributes (correct)"
+          fi
+
+          # Test a wheel URL
+          echo "3. Testing wheel accessibility..."
+          WHEEL_URL=$(grep -oP 'href="\K[^"]+' /tmp/pkg-index.html | head -1)
+          if [ -n "$WHEEL_URL" ]; then
+            echo "   Testing: $WHEEL_URL"
+            if curl -I -f "$WHEEL_URL" > /dev/null 2>&1; then
+              echo "   ✅ Wheel is accessible"
+            else
+              echo "   ❌ Wheel is NOT accessible"
+              exit 1
+            fi
+          fi
+
+      - name: Test pip installation
+        run: |
+          echo "🧪 Testing pip installation..."
+
+          TEST_PACKAGE="${{ github.event.inputs.test_package || 'requests' }}"
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          # Create a clean virtual environment
+          python -m venv test-venv
+          source test-venv/bin/activate
+
+          echo ""
+          echo "Installing $TEST_PACKAGE from S3 repository..."
+          pip install -v "$TEST_PACKAGE" \
+            --index-url "$S3_URL/test/simple/" \
+            --trusted-host "${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          echo ""
+          echo "✅ Installation successful!"
+
+          # Verify the package works
+          echo ""
+          echo "Testing import..."
+          python -c "import $(echo $TEST_PACKAGE | tr '-' '_'); print('✅ Import successful')"
+
+      - name: Cleanup test files from S3
+        if: always()
+        run: |
+          echo "🧹 Cleaning up test files from S3..."
+          aws s3 rm "s3://${{ secrets.AWS_S3_BUCKET }}/test/" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --recursive
+          echo "✅ Cleanup complete"
+
+      - name: Summary
+        if: always()
+        run: |
+          TEST_PACKAGE="${{ github.event.inputs.test_package || 'requests' }}"
+          S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
+
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Package:** $TEST_PACKAGE" >> $GITHUB_STEP_SUMMARY
+          echo "**Python Version:** ${{ github.event.inputs.python_version || '3.12' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Repository URL:** \`$S3_URL/test/simple/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Installation Command:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "pip install $TEST_PACKAGE \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --index-url $S3_URL/test/simple/ \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --trusted-host ${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

@@ -182,7 +182,7 @@ def generate_package_index(
             except Exception as e:
                 print(f"Warning: Could not extract metadata from {wheel_name}: {e}", file=sys.stderr)
 
-        if add_hashes:
+        if add_metadata:
             try:
                 sha256 = calculate_sha256(wheel_path)
                 attributes.append(f'data-dist-info-metadata="sha256={sha256}"')
