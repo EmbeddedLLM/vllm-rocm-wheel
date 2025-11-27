@@ -85,16 +85,6 @@ jobs:
           docker cp ${container_id}:/app/debs/. artifacts/base-wheels/
           docker rm ${container_id}
           ls -lh artifacts/base-wheels/
-      - name: Normalize base wheel versions
-        run: |
-          echo "Installing dependencies for normalization script..."
-          pip install packaging
-          echo ""
-          echo "Normalizing base wheel versions (removing +git... suffixes)..."
-          python .github/scripts/normalize_wheel_versions.py artifacts/base-wheels/
-          echo ""
-          echo "Normalized base wheels:"
-          ls -lh artifacts/base-wheels/
       - name: Export base Docker image for reuse
         run: |
           mkdir -p artifacts/docker-image
@@ -192,16 +182,6 @@ jobs:
             auditwheel repair --plat manylinux_2_28_x86_64 -w artifacts/vllm-wheel/ "$wheel" || \
             cp "$wheel" artifacts/vllm-wheel/
           done
-          ls -lh artifacts/vllm-wheel/
-      - name: Normalize vLLM wheel version
-        run: |
-          echo "Installing dependencies for normalization script..."
-          pip install packaging
-          echo ""
-          echo "Normalizing vLLM wheel version (removing +git... suffixes)..."
-          python .github/scripts/normalize_wheel_versions.py artifacts/vllm-wheel/
-          echo ""
-          echo "Normalized vLLM wheel:"
           ls -lh artifacts/vllm-wheel/
       - name: Upload vLLM wheel
         uses: actions/upload-artifact@v4

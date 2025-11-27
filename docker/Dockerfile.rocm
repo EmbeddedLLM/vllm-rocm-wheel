@@ -72,8 +72,14 @@ RUN python3 /tmp/filter_system_packages.py \
     ${COMMON_WORKDIR}/all-dependencies-filtered.txt \
     && mv ${COMMON_WORKDIR}/all-dependencies-filtered.txt ${COMMON_WORKDIR}/all-dependencies.txt
 
+# Remove custom wheels from dependency list (already collected separately)
+# This prevents pip from downloading different versions from PyPI
+RUN grep -v -E '^(torch|triton|triton-kernels|triton_kernels|torchvision|amdsmi|vllm)(@| ==|-)' \
+    ${COMMON_WORKDIR}/all-dependencies.txt > ${COMMON_WORKDIR}/all-dependencies-no-custom.txt || true
+RUN mv ${COMMON_WORKDIR}/all-dependencies-no-custom.txt ${COMMON_WORKDIR}/all-dependencies.txt
+
 # Show what we collected
-RUN echo "Collected dependencies (after filtering):" && cat ${COMMON_WORKDIR}/all-dependencies.txt
+RUN echo "Collected dependencies (after filtering custom wheels):" && cat ${COMMON_WORKDIR}/all-dependencies.txt
 
 # Verify custom ROCm wheels are available at /install
 RUN echo "Custom ROCm wheels at /install:" && ls -lh /install/
