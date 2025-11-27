@@ -87,8 +87,13 @@ RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
 
 FROM base AS final
-RUN --mount=type=bind,from=debs,src=/app/debs,target=/install \
-    pip install /install/*.whl
+# Copy wheels to permanent location first (so pip metadata references remain valid)
+RUN --mount=type=bind,from=debs,src=/app/debs,target=/tmp/debs \
+    mkdir -p /install && \
+    cp /tmp/debs/*.whl /install/
+
+# Install from permanent location
+RUN pip install /install/*.whl
 
 ARG BASE_IMAGE
 ARG TRITON_BRANCH

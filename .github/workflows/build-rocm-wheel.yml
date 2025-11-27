@@ -34,6 +34,14 @@ on:
         description: 'Run ID to reuse artifacts from (required if debug_mode or skip_to_job4 is true)'
         required: false
         default: ''
+      upload_wheels:
+        description: 'Upload wheels to S3 (false for nightly builds, true for releases)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 permissions:
   contents: write
   pages: write
@@ -104,85 +112,7 @@ jobs:
           name: rocm-base-image
           path: artifacts/docker-image/rocm-base-image.tar.gz
           retention-days: 7
-  collect-dependency-wheels:
-    name: Collect Dependency Wheels from PyPI
-    needs: build-base-wheels
-    if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch full history for correct version detection
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ github.event.inputs.python_version }}
-      - name: Install pip-tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-tools packaging requests
-      - name: Download base wheels artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: rocm-base-wheels
-          path: base-wheels
-      - name: List downloaded base wheels
-        run: |
-          echo "Base wheels that will be used for dependency resolution:"
-          ls -lh base-wheels/
-      - name: Download dependency wheels with version ranges
-        run: |
-          python .github/scripts/download_dependency_wheels.py \
-            --requirements requirements/rocm.txt \
-            --output-dir artifacts/dependency-wheels \
-            --python-version ${{ github.event.inputs.python_version }} \
-            --max-versions 5 \
-            --base-wheels-dir base-wheels
-      - name: List downloaded wheels
-        run: |
-          echo "Downloaded wheels:"
-          ls -lh artifacts/dependency-wheels/
-          echo "Total size:"
-          du -sh artifacts/dependency-wheels/
-          echo "Total count: $(ls artifacts/dependency-wheels/*.whl 2>/dev/null | wc -l) wheels"
 
-      - name: Validate critical dependencies
-        run: |
-          WHEEL_COUNT=$(ls artifacts/dependency-wheels/*.whl 2>/dev/null | wc -l)
-          echo "Downloaded $WHEEL_COUNT wheels"
-
-          # With transitive dependencies, we should have 150+ wheels
-          if [ "$WHEEL_COUNT" -lt 150 ]; then
-            echo "::error::Too few wheels downloaded ($WHEEL_COUNT). Expected at least 150 (including transitive dependencies)."
-            echo "::error::Check the download logs above for failures."
-            exit 1
-          fi
-
-          # Check for specific critical packages (including transitive deps)
-          CRITICAL_PKGS="regex numpy transformers tokenizers protobuf pydantic aiohttp requests tqdm fastapi anyio"
-          MISSING=""
-
-          for pkg in $CRITICAL_PKGS; do
-            if ! ls artifacts/dependency-wheels/${pkg}-*.whl 2>/dev/null | grep -q .; then
-              MISSING="$MISSING $pkg"
-            fi
-          done
-
-          if [ -n "$MISSING" ]; then
-            echo "::error::Missing critical packages:$MISSING"
-            echo "::error::These packages are required for vllm to function properly."
-            exit 1
-          fi
-
-          echo "✅ All critical packages present!"
-
-      - name: Upload dependency wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-wheels
-          path: artifacts/dependency-wheels/*.whl
-          retention-days: 7
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
@@ -243,6 +173,16 @@ jobs:
             .
           ls -lh dist/
           ls -lh dist/*.whl
+
+          echo ""
+          echo "Extracted dependency wheels:"
+          ls -lh dist/dependency-wheels/
+          echo "Total dependency wheels: $(ls dist/dependency-wheels/*.whl 2>/dev/null | wc -l)"
+
+          echo ""
+          echo "Dependency list:"
+          cat dist/all-dependencies.txt
+
       - name: Install auditwheel and repair wheel
         run: |
           python -m pip install auditwheel patchelf
@@ -269,10 +209,18 @@ jobs:
           name: vllm-wheel
           path: artifacts/vllm-wheel/*.whl
           retention-days: 7
+
+      - name: Upload dependency wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-wheels
+          path: dist/dependency-wheels/*.whl
+          retention-days: 7
+
   create-pypi-repository:
     name: Create PyPI Repository and Publish
-    needs: [build-base-wheels, collect-dependency-wheels, build-vllm-wheel]
-    if: always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true') && (github.event.inputs.debug_mode != 'true' || github.event.inputs.skip_to_job4 == 'true' || (needs.build-base-wheels.result == 'skipped' && needs.collect-dependency-wheels.result == 'skipped'))
+    needs: [build-base-wheels, build-vllm-wheel]
+    if: github.event.inputs.upload_wheels == 'true' && always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true')
     runs-on: ubuntu-latest-l
     steps:
       - name: Checkout repository
