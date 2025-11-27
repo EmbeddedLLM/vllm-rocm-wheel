@@ -45,6 +45,8 @@ def filter_system_packages(input_file: str, output_file: str):
             continue
 
         # Check 2: Check installation location to exclude system-installed packages
+        # Only exclude packages in system directories (/usr/lib/python3*/)
+        # Keep packages in pip directories (/usr/local/lib/python3.12/)
         try:
             result = subprocess.run(
                 ['pip', 'show', pkg],
@@ -52,7 +54,9 @@ def filter_system_packages(input_file: str, output_file: str):
                 text=True,
                 timeout=2
             )
-            if '/dist-packages' in result.stdout:
+            # Exclude only if in system Python 3.10 directories
+            if '/usr/lib/python3/dist-packages' in result.stdout or \
+               '/usr/lib/python3.10/dist-packages' in result.stdout:
                 print(f"Excluding system location: {line.strip()}", file=sys.stderr)
                 excluded.append(line.strip())
                 continue
