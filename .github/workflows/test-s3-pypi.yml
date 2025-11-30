@@ -57,7 +57,7 @@ jobs:
           # Use the website endpoint URL with /test prefix
           S3_URL="http://${{ secrets.AWS_S3_BUCKET }}.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com/test"
 
-          python3 .github/scripts/generate_s3_index.py \
+          python3 tools/vllm-rocm/generate_s3_index.py \
             --wheels-dir test-wheels \
             --output-dir test-index \
             --s3-url "$S3_URL" \

@@ -36,13 +36,20 @@ RUN apt-get update -y \
         { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
     done \
     && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && apt-get install -y --no-install-recommends python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
        python${PYTHON_VERSION}-lib2to3 python-is-python3  \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
     && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
     && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
     && python3 --version && python3 -m pip --version
+
+# Remove Python 3.10 system packages that would interfere with Python 3.12
+RUN apt-get remove -y --auto-remove \
+    python3-blinker python3-dbus python3-distro python3-jeepney \
+    python3-secretstorage python3-gi python3-cryptography \
+    python3-jwt python3-keyring python3-apt python3-software-properties \
+    python3-more-itertools python3-importlib-metadata python3-zipp || true
 
 RUN pip install -U packaging 'cmake<4' ninja wheel 'setuptools<80' pybind11 Cython
 
@@ -103,7 +110,7 @@ RUN cd aiter \
     && git checkout ${AITER_BRANCH} \
     && git submodule update --init --recursive \
     && pip install -r requirements.txt
-RUN pip install pyyaml && cd aiter && PREBUILD_KERNELS=1 GPU_ARCHS=${AITER_ROCM_ARCH} python3 setup.py bdist_wheel --dist-dir=dist && ls /app/aiter/dist/*.whl
+RUN pip install pyyaml && cd aiter && GPU_ARCHS=${AITER_ROCM_ARCH} python3 setup.py bdist_wheel --dist-dir=dist && ls /app/aiter/dist/*.whl
 RUN mkdir -p /app/install && cp /app/aiter/dist/*.whl /app/install
 
 FROM base AS debs
@@ -118,6 +125,16 @@ RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
 RUN --mount=type=bind,from=build_aiter,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
+
+FROM base AS wheels_release_final
+# Copy wheels to permanent location first (so pip metadata references remain valid)
+RUN --mount=type=bind,from=debs,src=/app/debs,target=/tmp/debs \
+    mkdir -p /install && \
+    cp /tmp/debs/*.whl /install/
+
+# Install from permanent location
+RUN pip install /install/*.whl
+
 
 FROM base AS final
 RUN --mount=type=bind,from=debs,src=/app/debs,target=/install \

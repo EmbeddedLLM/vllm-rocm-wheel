@@ -66,7 +66,7 @@ jobs:
       - name: Build ROCm base image (full)
         run: |
           docker buildx build \
-            --file docker/Dockerfile.rocm_base.minimal \
+            --file docker/Dockerfile.rocm_base \
             --tag rocm/vllm-dev:base \
             --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
             --build-arg PYTHON_VERSION="${{ github.event.inputs.python_version }}" \
@@ -75,7 +75,7 @@ jobs:
       - name: Build debs stage for wheel extraction
         run: |
           docker buildx build \
-            --file docker/Dockerfile.rocm_base.minimal \
+            --file docker/Dockerfile.rocm_base \
             --tag rocm-base-debs:local \
             --target debs \
             --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
@@ -357,8 +357,8 @@ jobs:
 
       - name: Remove PyPI duplicates of custom ROCm packages
         run: |
-          chmod +x .github/scripts/cleanup_pypi_duplicates.sh
-          .github/scripts/cleanup_pypi_duplicates.sh artifacts/rocm-base-wheels all-wheels
+          chmod +x tools/vllm-rocm/cleanup_pypi_duplicates.sh
+          tools/vllm-rocm/cleanup_pypi_duplicates.sh artifacts/rocm-base-wheels all-wheels
 
       - name: Generate PyPI index for S3
         run: |
@@ -370,7 +370,7 @@ jobs:
           echo "S3 URL: $S3_URL"
 
           # Generate index using our script
-          python3 .github/scripts/generate_s3_index.py \
+          python3 tools/vllm-rocm/generate_s3_index.py \
             --wheels-dir all-wheels \
             --output-dir pypi-index \
             --s3-url "$S3_URL" \
@@ -397,7 +397,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          bash .github/scripts/upload_to_s3.sh \
+          bash tools/vllm-rocm/upload_to_s3.sh \
             all-wheels \
             pypi-index \
             "${{ secrets.AWS_S3_BUCKET }}" \
