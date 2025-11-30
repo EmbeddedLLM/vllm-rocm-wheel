@@ -72,6 +72,7 @@ FROM fetch_vllm AS build_vllm
 # Pin vLLM dependencies to exact versions of custom ROCm wheels
 # This ensures 'pip install vllm' automatically installs correct torch/triton/torchvision/amdsmi
 ARG COMMON_WORKDIR
+ARG VLLM_BRANCH="main"
 
 # Only pin dependencies if custom wheels exist in /install (wheel release mode)
 RUN if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
@@ -91,7 +92,16 @@ RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/d
 # Build vLLM
 # Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
 # Or use standard pip install from PyPI (image release mode)
+# Detect if building from a tag and strip 'v' prefix for setuptools_scm
 RUN cd vllm \
+    && if git show-ref --verify --quiet refs/tags/${VLLM_BRANCH}; then \
+           echo "Building from tag: ${VLLM_BRANCH}"; \
+           VLLM_VERSION="${VLLM_BRANCH#v}"; \
+           echo "Setting SETUPTOOLS_SCM_PRETEND_VERSION=${VLLM_VERSION}"; \
+           export SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_VERSION}"; \
+       else \
+           echo "Building from branch: ${VLLM_BRANCH} (using git version detection)"; \
+       fi \
     && if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
            echo "Building vLLM with custom wheels from /install"; \
            python3 -m pip install --find-links /install -r requirements/rocm.txt; \

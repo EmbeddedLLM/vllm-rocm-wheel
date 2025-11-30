@@ -184,7 +184,7 @@ jobs:
           echo "tag=$VLLM_VERSION" >> $GITHUB_OUTPUT
       - name: Build and extract vLLM wheel using Dockerfile.rocm
         run: |
-          echo "Building vLLM wheel from official release: ${{ steps.vllm_version.outputs.tag }}"
+          echo "Building vLLM wheel from: ${{ steps.vllm_version.outputs.tag }}"
           DOCKER_BUILDKIT=1 docker build \
             --file docker/Dockerfile.rocm \
             --target export_vllm \
