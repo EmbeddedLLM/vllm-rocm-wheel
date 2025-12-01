@@ -164,6 +164,8 @@ jobs:
       - name: Prepare base wheels for Docker build
         run: |
           mkdir -p docker/context/base-wheels
+          # Create a dummy file to ensure directory is never empty
+          touch docker/context/base-wheels/.keep
           cp artifacts/base-wheels/*.whl docker/context/base-wheels/
           ls -lh docker/context/base-wheels/
 
@@ -346,8 +348,8 @@ jobs:
 
           # List some sample wheels
           echo ""
-          echo "Sample wheels:"
-          ls -lh all-wheels/ | head -20
+          echo "All sample wheels:"
+          ls -lh all-wheels/
 
           echo ""
           echo "Total size:"

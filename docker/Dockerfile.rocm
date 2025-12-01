@@ -9,10 +9,14 @@ FROM ${BASE_IMAGE} AS base
 RUN mkdir -p /install
 
 # Copy custom ROCm wheels from docker/context if they exist (GitHub Actions mode)
-# If docker/context doesn't exist, this is a no-op (local build mode)
-RUN if [ -d docker/context/base-wheels ] && [ -n "$(ls -A docker/context/base-wheels/*.whl 2>/dev/null)" ]; then \
-        echo "Copying custom wheels from docker/context/base-wheels/ to /install/"; \
-        cp docker/context/base-wheels/*.whl /install/; \
+# COPY ensures Docker cache is invalidated when wheels change
+# .keep file ensures directory always exists for COPY to work
+COPY docker/context/base-wheels/ /tmp/base-wheels/
+RUN if [ -n "$(ls /tmp/base-wheels/*.whl 2>/dev/null)" ]; then \
+        echo "Found custom wheels - copying to /install"; \
+        cp /tmp/base-wheels/*.whl /install/ && \
+        echo "Copied custom wheels:"; \
+        ls -lh /install/; \
     else \
         echo "No custom wheels found - using BASE_IMAGE default packages"; \
     fi
@@ -115,10 +119,12 @@ FROM build_vllm AS collect_dependencies
 ARG COMMON_WORKDIR
 
 # Ensure custom wheels are available at /install for pip download --find-links
-# This is needed because pip download references file:///install/... paths from pipdeptree
-RUN if [ -d docker/context/base-wheels ] && [ -n "$(ls -A docker/context/base-wheels/*.whl 2>/dev/null)" ]; then \
+# COPY ensures Docker cache is invalidated when wheels change
+# .keep file ensures directory always exists for COPY to work
+COPY docker/context/base-wheels/ /tmp/collect-wheels/
+RUN if [ -n "$(ls /tmp/collect-wheels/*.whl 2>/dev/null)" ]; then \
         mkdir -p /install && \
-        cp docker/context/base-wheels/*.whl /install/ && \
+        cp /tmp/collect-wheels/*.whl /install/ && \
         echo "Copied custom wheels to /install for dependency resolution"; \
     else \
         echo "No custom wheels to copy - skipping"; \
