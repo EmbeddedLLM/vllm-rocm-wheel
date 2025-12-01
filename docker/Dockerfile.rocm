@@ -114,6 +114,16 @@ RUN cd vllm \
 FROM build_vllm AS collect_dependencies
 ARG COMMON_WORKDIR
 
+# Ensure custom wheels are available at /install for pip download --find-links
+# This is needed because pip download references file:///install/... paths from pipdeptree
+RUN if [ -d docker/context/base-wheels ] && [ -n "$(ls -A docker/context/base-wheels/*.whl 2>/dev/null)" ]; then \
+        mkdir -p /install && \
+        cp docker/context/base-wheels/*.whl /install/ && \
+        echo "Copied custom wheels to /install for dependency resolution"; \
+    else \
+        echo "No custom wheels to copy - skipping"; \
+    fi
+
 # Only proceed with dependency collection if custom wheels exist (wheel release mode)
 # In image release mode, skip this entire stage
 RUN if [ ! -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
@@ -123,14 +133,13 @@ RUN if [ ! -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
         echo "Collecting dependencies for wheel release"; \
     fi
 
-# Install pipdeptree for dependency analysis
-RUN python3 -m pip install pipdeptree
 
 # Install all built wheels into the environment
 RUN cd ${COMMON_WORKDIR}/vllm && python3 -m pip install dist/*.whl
 
-# Export dependency tree
-RUN pipdeptree --freeze > ${COMMON_WORKDIR}/all-dependencies.txt
+# Export ALL installed dependencies (including transitive dependencies)
+# Use 'pip freeze' instead of 'pipdeptree --freeze' to capture ALL packages
+RUN pip freeze > ${COMMON_WORKDIR}/all-dependencies.txt
 
 # Copy filtering script and run it
 COPY tools/vllm-rocm/filter_system_packages.py /tmp/filter_system_packages.py
