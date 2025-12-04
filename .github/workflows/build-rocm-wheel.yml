@@ -5,7 +5,7 @@ on:
       pytorch_rocm_arch:
         description: 'ROCm GPU architectures (semicolon-separated)'
         required: false
-        default: 'gfx942'
+        default: 'gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151'
       python_version:
         description: 'Python version'
         required: false
@@ -18,16 +18,16 @@ on:
         description: 'vLLM version (tag like v0.11.2 or branch like main, or "latest" for auto-fetch)'
         required: false
         default: 'latest'
-      debug_mode:
-        description: 'Debug mode: skip Jobs 1&2, reuse artifacts from previous run'
+      reuse_base_wheels:
+        description: 'Reuse base wheels from previous run and rebuild vLLM wheel only (requires previous_run_id)'
         required: false
         default: 'false'
         type: choice
         options:
           - 'false'
           - 'true'
-      skip_to_job4:
-        description: 'Skip to Job 4 only: skip all builds, only publish (requires previous_run_id)'
+      publish_only:
+        description: 'Skip all builds and only publish wheels from previous run (requires previous_run_id)'
         required: false
         default: 'false'
         type: choice
@@ -35,7 +35,7 @@ on:
           - 'false'
           - 'true'
       previous_run_id:
-        description: 'Run ID to reuse artifacts from (required if debug_mode or skip_to_job4 is true)'
+        description: 'Run ID to reuse artifacts from (required if reuse_base_wheels or publish_only is true)'
         required: false
         default: ''
       upload_wheels:
@@ -53,7 +53,7 @@ permissions:
 jobs:
   build-base-wheels:
     name: Build ROCm Base Wheels
-    if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
+    if: github.event.inputs.reuse_base_wheels != 'true' && github.event.inputs.publish_only != 'true'
     runs-on:
       labels: self-hosted
     steps:
@@ -66,7 +66,7 @@ jobs:
       - name: Build ROCm base image (full)
         run: |
           docker buildx build \
-            --file docker/Dockerfile.rocm_base.minimal \
+            --file docker/Dockerfile.rocm_base \
             --tag rocm/vllm-dev:base \
             --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
             --build-arg PYTHON_VERSION="${{ github.event.inputs.python_version }}" \
@@ -75,7 +75,7 @@ jobs:
       - name: Build debs stage for wheel extraction
         run: |
           docker buildx build \
-            --file docker/Dockerfile.rocm_base.minimal \
+            --file docker/Dockerfile.rocm_base \
             --tag rocm-base-debs:local \
             --target debs \
             --build-arg PYTORCH_ROCM_ARCH="${{ github.event.inputs.pytorch_rocm_arch }}" \
@@ -110,7 +110,7 @@ jobs:
   build-vllm-wheel:
     name: Build vLLM ROCm Wheel
     needs: build-base-wheels
-    if: always() && github.event.inputs.skip_to_job4 != 'true' && (needs.build-base-wheels.result == 'success' || github.event.inputs.debug_mode == 'true')
+    if: always() && github.event.inputs.publish_only != 'true' && (needs.build-base-wheels.result == 'success' || github.event.inputs.reuse_base_wheels == 'true')
     runs-on:
       labels: self-hosted
     steps:
@@ -120,14 +120,14 @@ jobs:
           fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download base Docker image (normal mode)
-        if: github.event.inputs.debug_mode != 'true'
+        if: github.event.inputs.reuse_base_wheels != 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-image
           path: artifacts/docker-image
 
-      - name: Download base Docker image (debug mode - from previous run)
-        if: github.event.inputs.debug_mode == 'true'
+      - name: Download base Docker image (reuse_base_wheels mode - from previous run)
+        if: github.event.inputs.reuse_base_wheels == 'true'
         uses: actions/download-artifact@v4
         with:
           name: rocm-base-image
@@ -138,6 +138,37 @@ jobs:
         run: |
           gunzip -c artifacts/docker-image/rocm-base-image.tar.gz | docker load
           docker images rocm/vllm-dev:base
+
+      - name: Download base wheels (normal mode)
+        if: github.event.inputs.reuse_base_wheels != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-base-wheels
+          path: artifacts/base-wheels
+
+      - name: Download base wheels (reuse_base_wheels mode - from previous run)
+        if: github.event.inputs.reuse_base_wheels == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-base-wheels
+          path: artifacts/base-wheels
+          run-id: ${{ github.event.inputs.previous_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify base wheels downloaded
+        run: |
+          echo "Base wheels downloaded:"
+          ls -lh artifacts/base-wheels/
+          echo "Total wheels: $(ls artifacts/base-wheels/*.whl 2>/dev/null | wc -l)"
+
+      - name: Prepare base wheels for Docker build
+        run: |
+          mkdir -p docker/context/base-wheels
+          # Create a dummy file to ensure directory is never empty
+          touch docker/context/base-wheels/.keep
+          cp artifacts/base-wheels/*.whl docker/context/base-wheels/
+          ls -lh docker/context/base-wheels/
+
       - name: Get vLLM version
         id: vllm_version
         run: |
@@ -161,7 +192,7 @@ jobs:
           echo "tag=$VLLM_VERSION" >> $GITHUB_OUTPUT
       - name: Build and extract vLLM wheel using Dockerfile.rocm
         run: |
-          echo "Building vLLM wheel from official release: ${{ steps.vllm_version.outputs.tag }}"
+          echo "Building vLLM wheel from: ${{ steps.vllm_version.outputs.tag }}"
           DOCKER_BUILDKIT=1 docker build \
             --file docker/Dockerfile.rocm \
             --target export_vllm \
@@ -211,7 +242,7 @@ jobs:
   create-pypi-repository:
     name: Create PyPI Repository and Publish
     needs: [build-base-wheels, build-vllm-wheel]
-    if: github.event.inputs.upload_wheels == 'true' && always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.skip_to_job4 == 'true')
+    if: github.event.inputs.upload_wheels == 'true' && always() && (needs.build-vllm-wheel.result == 'success' || github.event.inputs.publish_only == 'true')
     runs-on: ubuntu-latest-l
     steps:
       - name: Checkout repository
@@ -220,35 +251,35 @@ jobs:
           fetch-depth: 0  # Fetch full history for correct version detection
 
       - name: Download all artifacts (normal mode)
-        if: github.event.inputs.debug_mode != 'true' && github.event.inputs.skip_to_job4 != 'true'
+        if: github.event.inputs.reuse_base_wheels != 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Download all artifacts (debug mode - from previous run + current)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download all artifacts (reuse_base_wheels mode - from previous run + current)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           run-id: ${{ github.event.inputs.previous_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download vLLM wheel from current run (debug mode)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download vLLM wheel from current run (reuse_base_wheels mode)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
           path: artifacts/vllm-wheel
 
-      - name: Download dependency wheels from current run (debug mode)
-        if: github.event.inputs.debug_mode == 'true' && github.event.inputs.skip_to_job4 != 'true'
+      - name: Download dependency wheels from current run (reuse_base_wheels mode)
+        if: github.event.inputs.reuse_base_wheels == 'true' && github.event.inputs.publish_only != 'true'
         uses: actions/download-artifact@v4
         with:
           name: dependency-wheels
           path: artifacts/dependency-wheels
 
-      - name: Download all artifacts (skip to job 4 mode - from previous run only)
-        if: github.event.inputs.skip_to_job4 == 'true'
+      - name: Download all artifacts (publish_only mode - from previous run only)
+        if: github.event.inputs.publish_only == 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -317,8 +348,8 @@ jobs:
 
           # List some sample wheels
           echo ""
-          echo "Sample wheels:"
-          ls -lh all-wheels/ | head -20
+          echo "All sample wheels:"
+          ls -lh all-wheels/
 
           echo ""
           echo "Total size:"
@@ -357,8 +388,8 @@ jobs:
 
       - name: Remove PyPI duplicates of custom ROCm packages
         run: |
-          chmod +x .github/scripts/cleanup_pypi_duplicates.sh
-          .github/scripts/cleanup_pypi_duplicates.sh artifacts/rocm-base-wheels all-wheels
+          chmod +x tools/vllm-rocm/cleanup_pypi_duplicates.sh
+          tools/vllm-rocm/cleanup_pypi_duplicates.sh artifacts/rocm-base-wheels all-wheels
 
       - name: Generate PyPI index for S3
         run: |
@@ -370,7 +401,7 @@ jobs:
           echo "S3 URL: $S3_URL"
 
           # Generate index using our script
-          python3 .github/scripts/generate_s3_index.py \
+          python3 tools/vllm-rocm/generate_s3_index.py \
             --wheels-dir all-wheels \
             --output-dir pypi-index \
             --s3-url "$S3_URL" \
@@ -397,7 +428,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          bash .github/scripts/upload_to_s3.sh \
+          bash tools/vllm-rocm/upload_to_s3.sh \
             all-wheels \
             pypi-index \
             "${{ secrets.AWS_S3_BUCKET }}" \

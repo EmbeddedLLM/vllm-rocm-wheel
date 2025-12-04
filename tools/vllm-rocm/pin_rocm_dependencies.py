@@ -55,6 +55,8 @@ def get_custom_wheel_versions(install_dir: str) -> Dict[str, str]:
         'triton_kernels-': 'triton-kernels',  # Match triton_kernels-
         'torchvision-': 'torchvision',        # Match torchvision-
         'amdsmi-': 'amdsmi',                  # Match amdsmi-
+        'flash_attn-': 'flash-attn',          # Match flash_attn-
+        'aiter-': 'aiter',                    # Match aiter-
     }
 
     for wheel_file in install_path.glob('*.whl'):
