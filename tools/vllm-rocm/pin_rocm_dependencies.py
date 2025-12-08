@@ -49,20 +49,22 @@ def get_custom_wheel_versions(install_dir: str) -> Dict[str, str]:
 
     # Map wheel prefixes to package names
     # IMPORTANT: Use dashes to avoid matching substrings (e.g., 'torch' would match 'torchvision')
-    package_mapping = {
-        'torch-': 'torch',                    # Match torch- (not torchvision)
-        'triton-': 'triton',                  # Match triton- (not triton_kernels)
-        'triton_kernels-': 'triton-kernels',  # Match triton_kernels-
-        'torchvision-': 'torchvision',        # Match torchvision-
-        'amdsmi-': 'amdsmi',                  # Match amdsmi-
-        'flash_attn-': 'flash-attn',          # Match flash_attn-
-        'aiter-': 'aiter',                    # Match aiter-
-    }
+    # ORDER MATTERS: This order is preserved when pinning dependencies in requirements files
+    package_mapping = [
+        ('torch-', 'torch'),                    # Match torch- (not torchvision)
+        ('triton-', 'triton'),                  # Match triton- (not triton_kernels)
+        ('triton_kernels-', 'triton-kernels'),  # Match triton_kernels-
+        ('torchvision-', 'torchvision'),        # Match torchvision-
+        ('torchaudio-', 'torchaudio'),          # Match torchaudio-
+        ('amdsmi-', 'amdsmi'),                  # Match amdsmi-
+        ('flash_attn-', 'flash-attn'),          # Match flash_attn-
+        ('aiter-', 'aiter'),                    # Match aiter-
+    ]
 
     for wheel_file in install_path.glob('*.whl'):
         wheel_name = wheel_file.name
 
-        for prefix, package_name in package_mapping.items():
+        for prefix, package_name in package_mapping:
             if wheel_name.startswith(prefix):
                 try:
                     version = extract_version_from_wheel(wheel_name)
@@ -72,7 +74,12 @@ def get_custom_wheel_versions(install_dir: str) -> Dict[str, str]:
                     print(f"WARNING: Could not extract version from {wheel_name}: {e}", file=sys.stderr)
                 break
 
-    return versions
+    # Return versions in the order defined by package_mapping
+    ordered_versions = {}
+    for _, package_name in package_mapping:
+        if package_name in versions:
+            ordered_versions[package_name] = versions[package_name]
+    return ordered_versions
 
 
 def pin_dependencies_in_requirements(requirements_path: str, versions: Dict[str, str]):
@@ -114,7 +121,7 @@ def pin_dependencies_in_requirements(requirements_path: str, versions: Dict[str,
         "# These must come FIRST to ensure correct dependency resolution\n",
     ]
 
-    for package_name, exact_version in sorted(versions.items()):
+    for package_name, exact_version in versions.items():
         header_lines.append(f"{package_name}=={exact_version}\n")
 
     header_lines.append("\n")  # Blank line separator
@@ -151,7 +158,7 @@ def pin_dependencies_in_requirements(requirements_path: str, versions: Dict[str,
 
     # Print summary
     print("\n✓ Inserted custom wheel pins at TOP of requirements:", file=sys.stderr)
-    for package_name, exact_version in sorted(versions.items()):
+    for package_name, exact_version in versions.items():
         print(f"  - {package_name}=={exact_version}", file=sys.stderr)
 
     if removed_packages:
