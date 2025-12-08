@@ -212,14 +212,14 @@ def generate_index_and_metadata(
         print("No wheel files found, skipping index generation.")
         return
 
-    # For ROCm builds: inherit variant from vllm_rocm wheel
-    # All ROCm wheels should share the same variant as vllm_rocm
+    # For ROCm builds: inherit variant from vllm wheel
+    # All ROCm wheels should share the same variant as vllm
     rocm_variant = None
     for file in parsed_files:
-        if file.package_name in ("vllm_rocm", "vllm-rocm") and file.variant:
+        if file.package_name == "vllm" and file.variant:
             if file.variant.startswith("rocm"):
                 rocm_variant = file.variant
-                print(f"Detected ROCm variant from vllm_rocm: {rocm_variant}")
+                print(f"Detected ROCm variant from vllm: {rocm_variant}")
                 break
 
     # Apply ROCm variant to all wheels without a variant
