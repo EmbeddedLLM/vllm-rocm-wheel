@@ -239,7 +239,9 @@ steps:
   # ROCm Job 1: Build ROCm Base Wheels
   - label: ":rocm: Build ROCm Base Wheels"
     id: build-rocm-base-wheels
-    depends_on: ~
+    depends_on:
+      - step: input-rocm-config
+        allow_failure: true  # Allow failure so non-UI builds can proceed (input step is skipped)
     if: |
       build.env("ROCM_REUSE_BASE_WHEELS") != "true" &&
       build.env("ROCM_PUBLISH_ONLY") != "true"
@@ -248,10 +250,14 @@ steps:
     timeout_in_minutes: 240
     commands:
       # Set configuration from input or environment
+      # NOTE: Two-step assignment handles empty strings from meta-data get
       - |
-        export ROCM_VERSION="${ROCM_VERSION:-$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '7.1')}"
-        export PYTHON_VERSION="${ROCM_PYTHON_VERSION:-$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '3.12')}"
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151')}"
+        ROCM_VERSION="$(buildkite-agent meta-data get rocm-version 2>/dev/null || true)"
+        export ROCM_VERSION="${ROCM_VERSION:-7.1}"
+        PYTHON_VERSION="$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || true)"
+        export PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || true)"
+        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
 
         echo "========================================"
         echo "Building ROCm base wheels with:"
@@ -267,8 +273,10 @@ steps:
 
       # Build full base image (for later vLLM build)
       - |
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
-        export PYTHON_VERSION="${ROCM_PYTHON_VERSION:-$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '3.12')}"
+        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || true)"
+        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
+        PYTHON_VERSION="$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || true)"
+        export PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
         DOCKER_BUILDKIT=1 docker buildx build \
           --file docker/Dockerfile.rocm_base \
           --tag rocm/vllm-dev:base-${BUILDKITE_BUILD_NUMBER} \
@@ -279,8 +287,10 @@ steps:
 
       # Build debs stage for wheel extraction
       - |
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
-        export PYTHON_VERSION="${ROCM_PYTHON_VERSION:-$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '3.12')}"
+        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || true)"
+        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
+        PYTHON_VERSION="$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || true)"
+        export PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
         DOCKER_BUILDKIT=1 docker buildx build \
           --file docker/Dockerfile.rocm_base \
           --tag rocm-base-debs:${BUILDKITE_BUILD_NUMBER} \
@@ -323,16 +333,23 @@ steps:
     timeout_in_minutes: 120
     commands:
       # Get configuration
+      # NOTE: Two-step assignment handles empty strings from meta-data get
       - |
-        export ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || echo 'latest')}"
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
-        export ROCM_REUSE_BASE_WHEELS="${ROCM_REUSE_BASE_WHEELS:-$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo 'false')}"
-        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')}"
+        ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || true)"
+        export ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-latest}"
+        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || true)"
+        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
+        ROCM_REUSE_BASE_WHEELS="$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || true)"
+        export ROCM_REUSE_BASE_WHEELS="${ROCM_REUSE_BASE_WHEELS:-false}"
+        ROCM_PREVIOUS_BUILD_ID="$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || true)"
+        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-}"
 
       # Download artifacts (from current or previous build)
       - |
-        export ROCM_REUSE_BASE_WHEELS="${ROCM_REUSE_BASE_WHEELS:-$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo 'false')}"
-        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')}"
+        ROCM_REUSE_BASE_WHEELS="$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || true)"
+        export ROCM_REUSE_BASE_WHEELS="${ROCM_REUSE_BASE_WHEELS:-false}"
+        ROCM_PREVIOUS_BUILD_ID="$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || true)"
+        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-}"
         if [ "$ROCM_REUSE_BASE_WHEELS" = "true" ] && [ -n "$ROCM_PREVIOUS_BUILD_ID" ]; then
           echo "Downloading artifacts from previous build: $ROCM_PREVIOUS_BUILD_ID"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$ROCM_PREVIOUS_BUILD_ID"
@@ -362,7 +379,8 @@ steps:
 
       # Resolve vLLM version
       - |
-        export ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || echo 'latest')}"
+        ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || true)"
+        export ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-latest}"
         if [ "$ROCM_VLLM_VERSION" = "latest" ] || [ -z "$ROCM_VLLM_VERSION" ]; then
           echo "Fetching latest vLLM release..."
           ROCM_VLLM_VERSION=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
@@ -376,8 +394,10 @@ steps:
 
       # Build vLLM wheel
       - |
-        export ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-resolved-vllm-version)"
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
+        ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-resolved-vllm-version 2>/dev/null || true)"
+        export ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-main}"
+        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || true)"
+        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
         DOCKER_BUILDKIT=1 docker build \
           --file docker/Dockerfile.rocm \
           --target export_vllm \
@@ -422,9 +442,12 @@ steps:
     timeout_in_minutes: 60
     commands:
       # Download all wheel artifacts
+      # NOTE: Two-step assignment handles empty strings from meta-data get
       - |
-        export ROCM_PUBLISH_ONLY="${ROCM_PUBLISH_ONLY:-$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo 'false')}"
-        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')}"
+        ROCM_PUBLISH_ONLY="$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || true)"
+        export ROCM_PUBLISH_ONLY="${ROCM_PUBLISH_ONLY:-false}"
+        ROCM_PREVIOUS_BUILD_ID="$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || true)"
+        export ROCM_PREVIOUS_BUILD_ID="${ROCM_PREVIOUS_BUILD_ID:-}"
         if [ "$ROCM_PUBLISH_ONLY" = "true" ] && [ -n "$ROCM_PREVIOUS_BUILD_ID" ]; then
           echo "Downloading all artifacts from previous build: $ROCM_PREVIOUS_BUILD_ID"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$ROCM_PREVIOUS_BUILD_ID"
