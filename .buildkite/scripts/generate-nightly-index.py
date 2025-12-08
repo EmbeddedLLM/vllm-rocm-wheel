@@ -78,7 +78,13 @@ def parse_from_filename(file: str) -> WheelFileInfo:
             version = version.removesuffix("." + variant)
     else:
         if "+" in version:
-            version, variant = version.split("+")
+            version_part, suffix = version.split("+", 1)
+            # Only treat known patterns as variants (rocmXXX, cuXXX, cpu)
+            # Git hashes and other suffixes are NOT variants
+            if suffix.startswith(("rocm", "cu", "cpu")):
+                variant = suffix
+                version = version_part
+            # Otherwise keep the full version string (variant stays None)
 
     return WheelFileInfo(
         package_name=package_name,
@@ -205,6 +211,23 @@ def generate_index_and_metadata(
     if not parsed_files:
         print("No wheel files found, skipping index generation.")
         return
+
+    # For ROCm builds: inherit variant from vllm_rocm wheel
+    # All ROCm wheels should share the same variant as vllm_rocm
+    rocm_variant = None
+    for file in parsed_files:
+        if file.package_name in ("vllm_rocm", "vllm-rocm") and file.variant:
+            if file.variant.startswith("rocm"):
+                rocm_variant = file.variant
+                print(f"Detected ROCm variant from vllm_rocm: {rocm_variant}")
+                break
+
+    # Apply ROCm variant to all wheels without a variant
+    if rocm_variant:
+        for file in parsed_files:
+            if file.variant is None:
+                file.variant = rocm_variant
+                print(f"Inherited variant '{rocm_variant}' for {file.filename}")
 
     # Group by variant
     variant_to_files: dict[str, list[WheelFileInfo]] = {}
