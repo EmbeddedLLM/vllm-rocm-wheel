@@ -401,7 +401,21 @@ if __name__ == "__main__":
     # Generate index and metadata, assuming wheels and indices are stored as:
     # s3://vllm-wheels/{version}/<wheel files>
     # s3://vllm-wheels/<anything>/<index files>
-    wheel_base_dir = Path(output_dir).parent / version
+    #
+    # For ROCm builds, version is "rocm/{commit}" and indices are uploaded to:
+    #   - rocm/{commit}/  (same as wheels)
+    #   - rocm/nightly/
+    #   - rocm/{version}/
+    # All these are under the "rocm/" prefix, so relative paths should be
+    # relative to "rocm/", not the bucket root.
+    #
+    # Extract the commit/version part after "rocm/" for path calculation
+    if version.startswith("rocm/"):
+        # For rocm/commit, wheel_base_dir should be just the commit part
+        # so relative path from rocm/0.12.0/rocm710/vllm/ -> ../../../{commit}/
+        wheel_base_dir = Path(output_dir).parent / version.split("/", 1)[1]
+    else:
+        wheel_base_dir = Path(output_dir).parent / version
     index_base_dir = Path(output_dir)
 
     generate_index_and_metadata(
