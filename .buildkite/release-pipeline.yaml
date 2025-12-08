@@ -255,59 +255,59 @@ steps:
         set -euo pipefail
 
         # Get values from meta-data (set by input step) or use defaults
-        ROCM_VERSION="$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '')"
-        ROCM_VERSION="${ROCM_VERSION:-7.1}"
+        ROCM_VERSION="$$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '')"
+        ROCM_VERSION="$${ROCM_VERSION:-7.1}"
 
-        PYTHON_VERSION="$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '')"
-        PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+        PYTHON_VERSION="$$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '')"
+        PYTHON_VERSION="$${PYTHON_VERSION:-3.12}"
 
-        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
-        PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
+        PYTORCH_ROCM_ARCH="$$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
+        PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
 
         echo "========================================"
         echo "Building ROCm base wheels with:"
-        echo "  ROCM_VERSION: ${ROCM_VERSION}"
-        echo "  PYTHON_VERSION: ${PYTHON_VERSION}"
-        echo "  PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
+        echo "  ROCM_VERSION: $${ROCM_VERSION}"
+        echo "  PYTHON_VERSION: $${PYTHON_VERSION}"
+        echo "  PYTORCH_ROCM_ARCH: $${PYTORCH_ROCM_ARCH}"
         echo "========================================"
 
         # Save resolved config for later jobs
-        buildkite-agent meta-data set "rocm-version" "${ROCM_VERSION}"
-        buildkite-agent meta-data set "rocm-python-version" "${PYTHON_VERSION}"
-        buildkite-agent meta-data set "rocm-pytorch-rocm-arch" "${PYTORCH_ROCM_ARCH}"
+        buildkite-agent meta-data set "rocm-version" "$${ROCM_VERSION}"
+        buildkite-agent meta-data set "rocm-python-version" "$${PYTHON_VERSION}"
+        buildkite-agent meta-data set "rocm-pytorch-rocm-arch" "$${PYTORCH_ROCM_ARCH}"
 
         # Build full base image (for later vLLM build)
         DOCKER_BUILDKIT=1 docker buildx build \
           --file docker/Dockerfile.rocm_base \
-          --tag rocm/vllm-dev:base-${BUILDKITE_BUILD_NUMBER} \
-          --build-arg PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
-          --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
+          --tag rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} \
+          --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
+          --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
           --load \
           .
 
         # Build debs stage for wheel extraction
         DOCKER_BUILDKIT=1 docker buildx build \
           --file docker/Dockerfile.rocm_base \
-          --tag rocm-base-debs:${BUILDKITE_BUILD_NUMBER} \
+          --tag rocm-base-debs:$${BUILDKITE_BUILD_NUMBER} \
           --target debs \
-          --build-arg PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
-          --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
+          --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
+          --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
           --load \
           .
 
       # Extract wheels from Docker image
       - |
         mkdir -p artifacts/rocm-base-wheels
-        container_id=$(docker create rocm-base-debs:${BUILDKITE_BUILD_NUMBER})
-        docker cp ${container_id}:/app/debs/. artifacts/rocm-base-wheels/
-        docker rm ${container_id}
+        container_id=$$(docker create rocm-base-debs:$${BUILDKITE_BUILD_NUMBER})
+        docker cp $${container_id}:/app/debs/. artifacts/rocm-base-wheels/
+        docker rm $${container_id}
         echo "Extracted base wheels:"
         ls -lh artifacts/rocm-base-wheels/
 
       # Export base Docker image for reuse in vLLM build
       - |
         mkdir -p artifacts/rocm-docker-image
-        docker save rocm/vllm-dev:base-${BUILDKITE_BUILD_NUMBER} | gzip > artifacts/rocm-docker-image/rocm-base-image.tar.gz
+        docker save rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} | gzip > artifacts/rocm-docker-image/rocm-base-image.tar.gz
         echo "Docker image size:"
         ls -lh artifacts/rocm-docker-image/
     artifact_paths:
@@ -332,16 +332,16 @@ steps:
         set -euo pipefail
 
         # Get configuration from meta-data with defaults
-        ROCM_REUSE_BASE_WHEELS="$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
-        ROCM_REUSE_BASE_WHEELS="${ROCM_REUSE_BASE_WHEELS:-false}"
+        ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
+        ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-false}"
 
-        ROCM_PREVIOUS_BUILD_ID="$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
+        ROCM_PREVIOUS_BUILD_ID="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
 
         # Download artifacts (from current or previous build)
-        if [ "${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "${ROCM_PREVIOUS_BUILD_ID}" ]; then
-          echo "Downloading artifacts from previous build: ${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" . --build "${ROCM_PREVIOUS_BUILD_ID}"
+        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
+          echo "Downloading artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
+          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
+          buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
         else
           echo "Downloading artifacts from current build"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
@@ -352,7 +352,7 @@ steps:
         echo "Loading base Docker image..."
         gunzip -c artifacts/rocm-docker-image/rocm-base-image.tar.gz | docker load
         docker images | grep rocm/vllm-dev | head -1
-        docker tag rocm/vllm-dev:base-* rocm/vllm-dev:base 2>/dev/null || docker tag $(docker images rocm/vllm-dev --format "{{.Repository}}:{{.Tag}}" | head -1) rocm/vllm-dev:base
+        docker tag rocm/vllm-dev:base-* rocm/vllm-dev:base 2>/dev/null || docker tag $$(docker images rocm/vllm-dev --format "{{.Repository}}:{{.Tag}}" | head -1) rocm/vllm-dev:base
         docker images rocm/vllm-dev:base
 
         # Prepare base wheels for Docker build context
@@ -367,17 +367,17 @@ steps:
         set -euo pipefail
 
         # Get configuration from meta-data with defaults
-        ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || echo '')"
-        ROCM_VLLM_VERSION="${ROCM_VLLM_VERSION:-latest}"
+        ROCM_VLLM_VERSION="$$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || echo '')"
+        ROCM_VLLM_VERSION="$${ROCM_VLLM_VERSION:-latest}"
 
-        PYTORCH_ROCM_ARCH="$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
-        PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
+        PYTORCH_ROCM_ARCH="$$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
+        PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
 
         # Resolve "latest" to actual version
-        if [ "${ROCM_VLLM_VERSION}" = "latest" ]; then
+        if [ "$${ROCM_VLLM_VERSION}" = "latest" ]; then
           echo "Fetching latest vLLM release..."
-          ROCM_VLLM_VERSION=$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
-          if [ "${ROCM_VLLM_VERSION}" = "null" ] || [ -z "${ROCM_VLLM_VERSION}" ]; then
+          ROCM_VLLM_VERSION=$$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
+          if [ "$${ROCM_VLLM_VERSION}" = "null" ] || [ -z "$${ROCM_VLLM_VERSION}" ]; then
             echo "WARNING: Could not fetch latest release, using main"
             ROCM_VLLM_VERSION="main"
           fi
@@ -385,12 +385,12 @@ steps:
 
         echo "========================================"
         echo "Building vLLM wheel with:"
-        echo "  ROCM_VLLM_VERSION: ${ROCM_VLLM_VERSION}"
-        echo "  PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
+        echo "  ROCM_VLLM_VERSION: $${ROCM_VLLM_VERSION}"
+        echo "  PYTORCH_ROCM_ARCH: $${PYTORCH_ROCM_ARCH}"
         echo "========================================"
 
         # Save resolved version for later jobs
-        buildkite-agent meta-data set "rocm-resolved-vllm-version" "${ROCM_VLLM_VERSION}"
+        buildkite-agent meta-data set "rocm-resolved-vllm-version" "$${ROCM_VLLM_VERSION}"
 
         # Build vLLM wheel
         DOCKER_BUILDKIT=1 docker build \
@@ -398,10 +398,10 @@ steps:
           --target export_vllm \
           --output type=local,dest=rocm-dist \
           --build-arg BASE_IMAGE=rocm/vllm-dev:base \
-          --build-arg ARG_PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
+          --build-arg ARG_PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
           --build-arg REMOTE_VLLM=1 \
           --build-arg VLLM_REPO=https://github.com/vllm-project/vllm.git \
-          --build-arg VLLM_BRANCH="${ROCM_VLLM_VERSION}" \
+          --build-arg VLLM_BRANCH="$${ROCM_VLLM_VERSION}" \
           .
 
         echo "Built vLLM wheel:"
@@ -413,9 +413,9 @@ steps:
         pip install auditwheel patchelf || true
         mkdir -p artifacts/rocm-vllm-wheel
         for wheel in rocm-dist/*.whl; do
-          echo "Repairing wheel: ${wheel}"
-          auditwheel repair --plat manylinux_2_35_x86_64 -w artifacts/rocm-vllm-wheel/ "${wheel}" || \
-            cp "${wheel}" artifacts/rocm-vllm-wheel/
+          echo "Repairing wheel: $${wheel}"
+          auditwheel repair --plat manylinux_2_35_x86_64 -w artifacts/rocm-vllm-wheel/ "$${wheel}" || \
+            cp "$${wheel}" artifacts/rocm-vllm-wheel/
         done
         echo "Final vLLM wheel:"
         ls -lh artifacts/rocm-vllm-wheel/
@@ -443,15 +443,15 @@ steps:
         set -euo pipefail
 
         # Get configuration from meta-data with defaults
-        ROCM_PUBLISH_ONLY="$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
-        ROCM_PUBLISH_ONLY="${ROCM_PUBLISH_ONLY:-false}"
+        ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
+        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-false}"
 
-        ROCM_PREVIOUS_BUILD_ID="$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
+        ROCM_PREVIOUS_BUILD_ID="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
 
-        if [ "${ROCM_PUBLISH_ONLY}" = "true" ] && [ -n "${ROCM_PREVIOUS_BUILD_ID}" ]; then
-          echo "Downloading all artifacts from previous build: ${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" . --build "${ROCM_PREVIOUS_BUILD_ID}"
+        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
+          echo "Downloading all artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
+          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
+          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
         else
           echo "Downloading artifacts from current build"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
