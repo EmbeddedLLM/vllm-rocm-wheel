@@ -305,14 +305,22 @@ steps:
         ls -lh artifacts/rocm-base-wheels/
 
       # Export base Docker image for reuse in vLLM build
+      # Upload directly to S3 (too large for Buildkite's 5GB limit)
       - |
         mkdir -p artifacts/rocm-docker-image
         docker save rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} | gzip > artifacts/rocm-docker-image/rocm-base-image.tar.gz
         echo "Docker image size:"
         ls -lh artifacts/rocm-docker-image/
+
+        # Upload large Docker image to S3
+        S3_ARTIFACT_PATH="s3://$${S3_BUCKET:-vllm-wheels}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}"
+        echo "Uploading Docker image to $${S3_ARTIFACT_PATH}/"
+        aws s3 cp artifacts/rocm-docker-image/rocm-base-image.tar.gz "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+
+        # Save the S3 path for downstream jobs
+        buildkite-agent meta-data set "rocm-docker-image-s3-path" "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
     artifact_paths:
       - "artifacts/rocm-base-wheels/*.whl"
-      - "artifacts/rocm-docker-image/rocm-base-image.tar.gz"
     env:
       DOCKER_BUILDKIT: "1"
 
@@ -337,16 +345,24 @@ steps:
 
         ROCM_PREVIOUS_BUILD_ID="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
 
-        # Download artifacts (from current or previous build)
+        # Download wheel artifacts from Buildkite
         if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
-          echo "Downloading artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
+          echo "Downloading wheel artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
         else
-          echo "Downloading artifacts from current build"
+          echo "Downloading wheel artifacts from current build"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
-          buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" .
         fi
+
+        # Download Docker image from S3 (too large for Buildkite artifacts)
+        DOCKER_IMAGE_S3_PATH="$$(buildkite-agent meta-data get rocm-docker-image-s3-path 2>/dev/null || echo '')"
+        if [ -z "$${DOCKER_IMAGE_S3_PATH}" ]; then
+          # Fallback to default path
+          DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET:-vllm-wheels}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
+        fi
+        echo "Downloading Docker image from $${DOCKER_IMAGE_S3_PATH}"
+        mkdir -p artifacts/rocm-docker-image
+        aws s3 cp "$${DOCKER_IMAGE_S3_PATH}" artifacts/rocm-docker-image/rocm-base-image.tar.gz
 
         # Load base Docker image
         echo "Loading base Docker image..."
