@@ -312,8 +312,12 @@ steps:
         echo "Docker image size:"
         ls -lh artifacts/rocm-docker-image/
 
+        # Debug: show S3_BUCKET value
+        echo "S3_BUCKET from env: $${S3_BUCKET}"
+
         # Upload large Docker image to S3
-        S3_ARTIFACT_PATH="s3://$${S3_BUCKET:-vllm-wheels}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}"
+        # Note: S3_BUCKET should be set in cluster secrets or pipeline env
+        S3_ARTIFACT_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}"
         echo "Uploading Docker image to $${S3_ARTIFACT_PATH}/"
         aws s3 cp artifacts/rocm-docker-image/rocm-base-image.tar.gz "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
 
@@ -323,6 +327,8 @@ steps:
       - "artifacts/rocm-base-wheels/*.whl"
     env:
       DOCKER_BUILDKIT: "1"
+      S3_BUCKET: "vllm-rocm-wheels-embeddedllm-2"
+      AWS_DEFAULT_REGION: "us-east-1"
 
   # ROCm Job 2: Build vLLM ROCm Wheel
   - label: ":python: Build vLLM ROCm Wheel"
@@ -439,6 +445,8 @@ steps:
       - "artifacts/rocm-vllm-wheel/*.whl"
     env:
       DOCKER_BUILDKIT: "1"
+      S3_BUCKET: "vllm-rocm-wheels-embeddedllm-2"
+      AWS_DEFAULT_REGION: "us-east-1"
 
   # ROCm Job 3: Upload Wheels to S3
   - label: ":s3: Upload ROCm Wheels to S3"
@@ -478,6 +486,8 @@ steps:
         bash .buildkite/scripts/upload-rocm-wheels.sh
     env:
       DOCKER_BUILDKIT: "1"
+      S3_BUCKET: "vllm-rocm-wheels-embeddedllm-2"
+      AWS_DEFAULT_REGION: "us-east-1"
 
   # # ROCm Job 4: Build ROCm Release Image (x86_64 only)
   # - label: ":docker: Build ROCm release image (x86_64)"
