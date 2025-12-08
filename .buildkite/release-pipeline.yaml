@@ -242,9 +242,6 @@ steps:
     depends_on:
       - step: input-rocm-config
         allow_failure: true  # Allow failure so non-UI builds can proceed (input step is skipped)
-    if: |
-      build.env("ROCM_REUSE_BASE_WHEELS") != "true" &&
-      build.env("ROCM_PUBLISH_ONLY") != "true"
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 240
@@ -253,6 +250,22 @@ steps:
       # All in one block to preserve shell variables across commands
       - |
         set -euo pipefail
+
+        # Check if we should skip this job
+        ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-}"
+        if [ -z "$${ROCM_REUSE_BASE_WHEELS}" ]; then
+          ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
+        fi
+        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-}"
+        if [ -z "$${ROCM_PUBLISH_ONLY}" ]; then
+          ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
+        fi
+
+        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] || [ "$${ROCM_PUBLISH_ONLY}" = "true" ]; then
+          echo "Skipping base wheel build (ROCM_REUSE_BASE_WHEELS=$${ROCM_REUSE_BASE_WHEELS}, ROCM_PUBLISH_ONLY=$${ROCM_PUBLISH_ONLY})"
+          echo "Will reuse artifacts from previous build"
+          exit 0
+        fi
 
         # Get values from meta-data (set by input step) or use defaults
         ROCM_VERSION="$$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '')"
@@ -335,8 +348,7 @@ steps:
     id: build-rocm-vllm-wheel
     depends_on:
       - step: build-rocm-base-wheels
-        allow_failure: false
-    if: build.env("ROCM_PUBLISH_ONLY") != "true"
+        allow_failure: true  # Allow to proceed even if Job 1 was skipped
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 120
@@ -344,6 +356,18 @@ steps:
       # Download artifacts and prepare Docker image
       - |
         set -euo pipefail
+
+        # Check if we should skip this job (publish only mode)
+        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-}"
+        if [ -z "$${ROCM_PUBLISH_ONLY}" ]; then
+          ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
+        fi
+
+        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ]; then
+          echo "Skipping vLLM wheel build (ROCM_PUBLISH_ONLY=$${ROCM_PUBLISH_ONLY})"
+          echo "Will reuse artifacts from previous build in upload step"
+          exit 0
+        fi
 
         # Get configuration from meta-data with defaults
         ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
@@ -363,8 +387,12 @@ steps:
         # Download Docker image from S3 (too large for Buildkite artifacts)
         DOCKER_IMAGE_S3_PATH="$$(buildkite-agent meta-data get rocm-docker-image-s3-path 2>/dev/null || echo '')"
         if [ -z "$${DOCKER_IMAGE_S3_PATH}" ]; then
-          # Fallback to default path
-          DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET:-vllm-wheels}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
+          # Fallback to default path (use previous build number if reusing)
+          if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
+            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_ID}/rocm-base-image.tar.gz"
+          else
+            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
+          fi
         fi
         echo "Downloading Docker image from $${DOCKER_IMAGE_S3_PATH}"
         mkdir -p artifacts/rocm-docker-image
@@ -453,7 +481,7 @@ steps:
     id: upload-rocm-wheels
     depends_on:
       - step: build-rocm-vllm-wheel
-        allow_failure: false
+        allow_failure: true  # Allow to proceed even if Job 2 was skipped (publish only mode)
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 60
