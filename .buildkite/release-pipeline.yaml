@@ -223,10 +223,10 @@ steps:
           - label: "Yes - Skip builds, only publish"
             value: "true"
         hint: "Skip all builds, only run S3 upload step"
-      - text: "Previous Build ID"
+      - text: "Previous Build Number"
         key: "rocm-previous-build-id"
         required: false
-        hint: "Build ID to download artifacts from (required if reuse-base-wheels or publish-only is true)"
+        hint: "Build number from previous build (e.g., 10). Required if reuse-base-wheels or publish-only is true."
       - select: "Upload Wheels to S3"
         key: "rocm-upload-wheels"
         default: "false"
@@ -373,12 +373,14 @@ steps:
         ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
         ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-false}"
 
-        ROCM_PREVIOUS_BUILD_ID="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
+        ROCM_PREVIOUS_BUILD_NUMBER="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
 
         # Download wheel artifacts from Buildkite
-        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
-          echo "Downloading wheel artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
+        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_NUMBER}" ]; then
+          # Use org/pipeline/build-number format for cross-build artifact download
+          PREV_BUILD_SLUG="$${BUILDKITE_ORGANIZATION_SLUG}/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_NUMBER}"
+          echo "Downloading wheel artifacts from previous build: $${PREV_BUILD_SLUG}"
+          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${PREV_BUILD_SLUG}"
         else
           echo "Downloading wheel artifacts from current build"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
@@ -388,8 +390,8 @@ steps:
         DOCKER_IMAGE_S3_PATH="$$(buildkite-agent meta-data get rocm-docker-image-s3-path 2>/dev/null || echo '')"
         if [ -z "$${DOCKER_IMAGE_S3_PATH}" ]; then
           # Fallback to default path (use previous build number if reusing)
-          if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
-            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_ID}/rocm-base-image.tar.gz"
+          if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_NUMBER}" ]; then
+            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_NUMBER}/rocm-base-image.tar.gz"
           else
             DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
           fi
@@ -525,12 +527,14 @@ steps:
         ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
         ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-false}"
 
-        ROCM_PREVIOUS_BUILD_ID="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
+        ROCM_PREVIOUS_BUILD_NUMBER="$$(buildkite-agent meta-data get rocm-previous-build-id 2>/dev/null || echo '')"
 
-        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_ID}" ]; then
-          echo "Downloading all artifacts from previous build: $${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
-          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_ID}"
+        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_NUMBER}" ]; then
+          # Use org/pipeline/build-number format for cross-build artifact download
+          PREV_BUILD_SLUG="$${BUILDKITE_ORGANIZATION_SLUG}/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_NUMBER}"
+          echo "Downloading all artifacts from previous build: $${PREV_BUILD_SLUG}"
+          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${PREV_BUILD_SLUG}"
+          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" . --build "$${PREV_BUILD_SLUG}"
         else
           echo "Downloading artifacts from current build"
           buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
