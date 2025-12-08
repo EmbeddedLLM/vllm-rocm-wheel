@@ -397,7 +397,7 @@ steps:
         mkdir -p artifacts/rocm-vllm-wheel
         for wheel in rocm-dist/*.whl; do
           echo "Repairing wheel: $wheel"
-          auditwheel repair --plat manylinux_2_28_x86_64 -w artifacts/rocm-vllm-wheel/ "$wheel" || \
+          auditwheel repair --plat manylinux_2_35_x86_64 -w artifacts/rocm-vllm-wheel/ "$wheel" || \
             cp "$wheel" artifacts/rocm-vllm-wheel/
         done
         echo "Final vLLM wheel:"
@@ -440,86 +440,86 @@ steps:
     env:
       DOCKER_BUILDKIT: "1"
 
-  # ROCm Job 4: Build ROCm Release Image (x86_64 only)
-  - label: ":docker: Build ROCm release image (x86_64)"
-    id: build-rocm-release-image-x86
-    depends_on:
-      - step: build-rocm-vllm-wheel
-        allow_failure: false
-    agents:
-      queue: vllm-rocm-wheel
-    timeout_in_minutes: 120
-    commands:
-      # Download wheel artifacts
-      - buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
-      - buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" .
-      - buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" .
+  # # ROCm Job 4: Build ROCm Release Image (x86_64 only)
+  # - label: ":docker: Build ROCm release image (x86_64)"
+  #   id: build-rocm-release-image-x86
+  #   depends_on:
+  #     - step: build-rocm-vllm-wheel
+  #       allow_failure: false
+  #   agents:
+  #     queue: vllm-rocm-wheel
+  #   timeout_in_minutes: 120
+  #   commands:
+  #     # Download wheel artifacts
+  #     - buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
+  #     - buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" .
+  #     - buildkite-agent artifact download "artifacts/rocm-docker-image/rocm-base-image.tar.gz" .
 
-      # Load base image
-      - |
-        gunzip -c artifacts/rocm-docker-image/rocm-base-image.tar.gz | docker load
-        docker tag rocm/vllm-dev:base-* rocm/vllm-dev:base 2>/dev/null || docker tag $(docker images rocm/vllm-dev --format "{{.Repository}}:{{.Tag}}" | head -1) rocm/vllm-dev:base
+  #     # Load base image
+  #     - |
+  #       gunzip -c artifacts/rocm-docker-image/rocm-base-image.tar.gz | docker load
+  #       docker tag rocm/vllm-dev:base-* rocm/vllm-dev:base 2>/dev/null || docker tag $(docker images rocm/vllm-dev --format "{{.Repository}}:{{.Tag}}" | head -1) rocm/vllm-dev:base
 
-      # Prepare context
-      - |
-        mkdir -p docker/context/base-wheels
-        cp artifacts/rocm-base-wheels/*.whl docker/context/base-wheels/
-        touch docker/context/base-wheels/.keep
+  #     # Prepare context
+  #     - |
+  #       mkdir -p docker/context/base-wheels
+  #       cp artifacts/rocm-base-wheels/*.whl docker/context/base-wheels/
+  #       touch docker/context/base-wheels/.keep
 
-      # Build final image
-      - |
-        export ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-resolved-vllm-version 2>/dev/null || echo 'main')"
-        export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
-        aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/q9t5s3a7
-        DOCKER_BUILDKIT=1 docker build \
-          --file docker/Dockerfile.rocm \
-          --target final \
-          --tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:${BUILDKITE_COMMIT} \
-          --tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:latest \
-          --build-arg BASE_IMAGE=rocm/vllm-dev:base \
-          --build-arg ARG_PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
-          --build-arg REMOTE_VLLM=1 \
-          --build-arg VLLM_BRANCH="${ROCM_VLLM_VERSION}" \
-          .
-        docker push public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:${BUILDKITE_COMMIT}
-        docker push public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:latest
-    env:
-      DOCKER_BUILDKIT: "1"
+  #     # Build final image
+  #     - |
+  #       export ROCM_VLLM_VERSION="$(buildkite-agent meta-data get rocm-resolved-vllm-version 2>/dev/null || echo 'main')"
+  #       export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo 'gfx90a;gfx942')}"
+  #       aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/q9t5s3a7
+  #       DOCKER_BUILDKIT=1 docker build \
+  #         --file docker/Dockerfile.rocm \
+  #         --target final \
+  #         --tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:${BUILDKITE_COMMIT} \
+  #         --tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:latest \
+  #         --build-arg BASE_IMAGE=rocm/vllm-dev:base \
+  #         --build-arg ARG_PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH}" \
+  #         --build-arg REMOTE_VLLM=1 \
+  #         --build-arg VLLM_BRANCH="${ROCM_VLLM_VERSION}" \
+  #         .
+  #       # docker push public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:${BUILDKITE_COMMIT}
+  #       # docker push public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:latest
+  #   env:
+  #     DOCKER_BUILDKIT: "1"
 
-  # ROCm Job 5: Publish ROCm nightly image to DockerHub
-  - label: ":docker: Publish ROCm nightly to DockerHub"
-    id: publish-rocm-dockerhub
-    depends_on:
-      - build-rocm-release-image-x86
-    if: build.env("NIGHTLY") == "1"
-    agents:
-      queue: vllm-rocm-wheel
-    commands:
-      - "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/q9t5s3a7"
-      - "docker pull public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT"
-      - "docker tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT vllm/vllm-rocm:nightly"
-      - "docker tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT vllm/vllm-rocm:nightly-$BUILDKITE_COMMIT"
-      - "docker push vllm/vllm-rocm:nightly"
-      - "docker push vllm/vllm-rocm:nightly-$BUILDKITE_COMMIT"
-      # Clean up old nightly builds (keep only last 14)
-      - "bash .buildkite/scripts/cleanup-rocm-nightly-builds.sh || true"
-    plugins:
-      - docker-login#v3.0.0:
-          username: vllmbot
-          password-env: DOCKERHUB_TOKEN
-    env:
-      DOCKER_BUILDKIT: "1"
-      DOCKERHUB_USERNAME: "vllmbot"
+  # # ROCm Job 5: Publish ROCm nightly image to DockerHub
+  # - label: ":docker: Publish ROCm nightly to DockerHub"
+  #   id: publish-rocm-dockerhub
+  #   depends_on:
+  #     - build-rocm-release-image-x86
+  #   if: build.env("NIGHTLY") == "1"
+  #   agents:
+  #     queue: vllm-rocm-wheel
+  #   commands:
+  #     - "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/q9t5s3a7"
+  #     - "docker pull public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT"
+  #     - "docker tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT vllm/vllm-rocm:nightly"
+  #     - "docker tag public.ecr.aws/q9t5s3a7/vllm-rocm-release-repo:$BUILDKITE_COMMIT vllm/vllm-rocm:nightly-$BUILDKITE_COMMIT"
+  #     - "docker push vllm/vllm-rocm:nightly"
+  #     - "docker push vllm/vllm-rocm:nightly-$BUILDKITE_COMMIT"
+  #     Clean up old nightly builds (keep only last 14)
+  #     - "bash .buildkite/scripts/cleanup-rocm-nightly-builds.sh || true"
+  #   plugins:
+  #     - docker-login#v3.0.0:
+  #         username: vllmbot
+  #         password-env: DOCKERHUB_TOKEN
+  #   env:
+  #     DOCKER_BUILDKIT: "1"
+  #     DOCKERHUB_USERNAME: "vllmbot"
 
-  # ROCm Job 6: Annotate ROCm Release
-  - label: ":memo: Annotate ROCm release workflow"
-    id: annotate-rocm-release
-    depends_on:
-      - step: upload-rocm-wheels
-        allow_failure: true
-      - step: build-rocm-release-image-x86
-        allow_failure: true
-    agents:
-      queue: vllm-rocm-wheel
-    commands:
-      - "bash .buildkite/scripts/annotate-rocm-release.sh"
+  # # ROCm Job 6: Annotate ROCm Release
+  # - label: ":memo: Annotate ROCm release workflow"
+  #   id: annotate-rocm-release
+  #   depends_on:
+  #     - step: upload-rocm-wheels
+  #       allow_failure: true
+  #     - step: build-rocm-release-image-x86
+  #       allow_failure: true
+  #   agents:
+  #     queue: vllm-rocm-wheel
+  #   commands:
+  #     - "bash .buildkite/scripts/annotate-rocm-release.sh"
