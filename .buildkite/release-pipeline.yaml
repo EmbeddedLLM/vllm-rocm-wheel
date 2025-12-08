@@ -454,10 +454,6 @@ steps:
     depends_on:
       - step: build-rocm-vllm-wheel
         allow_failure: false
-    if: |
-      build.env("ROCM_UPLOAD_WHEELS") == "true" ||
-      build.env("NIGHTLY") == "1" ||
-      build.branch =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$/
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 60
@@ -465,6 +461,37 @@ steps:
       # Download all wheel artifacts and run upload
       - |
         set -euo pipefail
+
+        # Check if upload is enabled (from env var, meta-data, or release branch)
+        ROCM_UPLOAD_WHEELS="$${ROCM_UPLOAD_WHEELS:-}"
+        if [ -z "$${ROCM_UPLOAD_WHEELS}" ]; then
+          # Try to get from meta-data (input form)
+          ROCM_UPLOAD_WHEELS="$$(buildkite-agent meta-data get rocm-upload-wheels 2>/dev/null || echo '')"
+        fi
+        NIGHTLY="$${NIGHTLY:-}"
+
+        # Check if branch matches release tag pattern (v1.2.3 or v1.2.3-rc1)
+        IS_RELEASE_BRANCH="false"
+        if [[ "$${BUILDKITE_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
+          IS_RELEASE_BRANCH="true"
+        fi
+
+        echo "========================================"
+        echo "Upload check:"
+        echo "  ROCM_UPLOAD_WHEELS: $${ROCM_UPLOAD_WHEELS}"
+        echo "  NIGHTLY: $${NIGHTLY}"
+        echo "  BUILDKITE_BRANCH: $${BUILDKITE_BRANCH}"
+        echo "  IS_RELEASE_BRANCH: $${IS_RELEASE_BRANCH}"
+        echo "========================================"
+
+        # Skip upload if not enabled
+        if [ "$${ROCM_UPLOAD_WHEELS}" != "true" ] && [ "$${NIGHTLY}" != "1" ] && [ "$${IS_RELEASE_BRANCH}" != "true" ]; then
+          echo "Skipping S3 upload (ROCM_UPLOAD_WHEELS != true, NIGHTLY != 1, not a release branch)"
+          echo "To enable upload, set 'Upload Wheels to S3' to 'Yes' in the build configuration"
+          exit 0
+        fi
+
+        echo "Upload enabled, proceeding..."
 
         # Get configuration from meta-data with defaults
         ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
