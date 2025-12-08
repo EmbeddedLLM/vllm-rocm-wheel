@@ -409,7 +409,7 @@ steps:
         # Load base Docker image
         echo "Loading base Docker image..."
         gunzip -c artifacts/rocm-docker-image/rocm-base-image.tar.gz | docker load
-        docker images | grep rocm/vllm-dev | head -1
+        docker images | grep rocm/vllm-dev | head -1 || true
         docker tag rocm/vllm-dev:base-* rocm/vllm-dev:base 2>/dev/null || docker tag $$(docker images rocm/vllm-dev --format "{{.Repository}}:{{.Tag}}" | head -1) rocm/vllm-dev:base
         docker images rocm/vllm-dev:base
 
