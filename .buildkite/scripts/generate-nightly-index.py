@@ -334,8 +334,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     version = args.version
-    if "/" in version or "\\" in version:
-        raise ValueError("Version string must not contain slashes.")
+    # Allow rocm/ prefix, reject other slashes and all backslashes
+    if "\\" in version:
+        raise ValueError("Version string must not contain backslashes.")
+    if "/" in version and not version.startswith("rocm/"):
+        raise ValueError("Version string must not contain slashes (except for 'rocm/' prefix).")
     current_objects_path = Path(args.current_objects)
     output_dir = Path(args.output_dir)
     if not output_dir.exists():
