@@ -422,16 +422,9 @@ steps:
         echo "Built vLLM wheel:"
         ls -lh rocm-dist/*.whl
 
-      # Repair wheel with auditwheel
-      - |
-        set -euo pipefail
-        pip install auditwheel patchelf || true
+        # Copy wheel to artifacts directory
         mkdir -p artifacts/rocm-vllm-wheel
-        for wheel in rocm-dist/*.whl; do
-          echo "Repairing wheel: $${wheel}"
-          auditwheel repair --plat manylinux_2_35_x86_64 -w artifacts/rocm-vllm-wheel/ "$${wheel}" || \
-            cp "$${wheel}" artifacts/rocm-vllm-wheel/
-        done
+        cp rocm-dist/*.whl artifacts/rocm-vllm-wheel/
         echo "Final vLLM wheel:"
         ls -lh artifacts/rocm-vllm-wheel/
     artifact_paths:
