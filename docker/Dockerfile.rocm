@@ -82,6 +82,14 @@ RUN if [ "$GIT_REPO_CHECK" != "0" ]; then \
         cd vllm && bash tools/check_repo.sh; \
     fi
 
+# Extract version from git BEFORE any modifications (pin_rocm_dependencies.py modifies requirements/rocm.txt)
+# This ensures setuptools_scm sees clean repo state for version detection
+RUN --mount=type=bind,source=.git,target=vllm/.git \
+    cd vllm \
+    && VLLM_VERSION=$(python3 -c "import setuptools_scm; print(setuptools_scm.get_version())") \
+    && echo "Detected vLLM version: ${VLLM_VERSION}" \
+    && echo "${VLLM_VERSION}" > /tmp/vllm_version.txt
+
 # Only pin dependencies if custom wheels exist in /install (wheel release mode)
 RUN if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
         echo "Custom wheels found in /install - will pin dependencies"; \
@@ -111,9 +119,16 @@ RUN cd vllm \
        fi \
     && python3 setup.py clean --all
 
-# Build wheel with .git mounted for setuptools_scm version detection (like CUDA Dockerfile)
+# Build wheel - use pre-extracted version for wheel releases (when custom wheels in /install)
+# to avoid dirty state from modified requirements/rocm.txt
 RUN --mount=type=bind,source=.git,target=vllm/.git \
     cd vllm \
+    && if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ] && [ -f /tmp/vllm_version.txt ]; then \
+           export SETUPTOOLS_SCM_PRETEND_VERSION=$(cat /tmp/vllm_version.txt); \
+           echo "Wheel release: Using pre-extracted version ${SETUPTOOLS_SCM_PRETEND_VERSION}"; \
+       else \
+           echo "Image build: Using setuptools_scm auto-detection"; \
+       fi \
     && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
 
 # collect_dependencies stage removed - we no longer collect PyPI dependencies
