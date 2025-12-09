@@ -16,6 +16,17 @@ from urllib.parse import quote
 
 import regex as re
 
+
+def normalize_package_name(name: str) -> str:
+    """
+    Normalize package name according to PEP 503.
+    https://peps.python.org/pep-0503/#normalized-names
+
+    Replace runs of underscores, hyphens, and periods with a single hyphen,
+    and lowercase the result.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
 if not sys.version_info >= (3, 12):
     raise RuntimeError("This script requires Python 3.12 or higher.")
 
@@ -279,8 +290,8 @@ def generate_index_and_metadata(
 
         variant_dir.mkdir(parents=True, exist_ok=True)
 
-        # gather all package names in this variant
-        packages = set(f.package_name for f in files)
+        # gather all package names in this variant (normalized per PEP 503)
+        packages = set(normalize_package_name(f.package_name) for f in files)
         if variant == "default":
             # these packages should also appear in the "project list"
             # generate after all variants are processed
@@ -292,8 +303,8 @@ def generate_index_and_metadata(
                 f.write(project_list_str)
 
         for package in packages:
-            # filter files belonging to this package only
-            package_files = [f for f in files if f.package_name == package]
+            # filter files belonging to this package only (compare normalized names)
+            package_files = [f for f in files if normalize_package_name(f.package_name) == package]
             package_dir = variant_dir / package
             package_dir.mkdir(parents=True, exist_ok=True)
             index_str, metadata_str = generate_package_index_and_metadata(
