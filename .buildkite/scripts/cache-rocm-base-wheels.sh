@@ -56,7 +56,12 @@ case "${1:-}" in
 
         # Check if cache exists by listing objects
         # We look for at least one .whl file
-        if aws s3 ls "${CACHE_PATH}" 2>/dev/null | grep -q "\.whl$"; then
+        echo "Running: aws s3 ls ${CACHE_PATH}" >&2
+        S3_OUTPUT=$(aws s3 ls "${CACHE_PATH}" 2>&1) || true
+        echo "S3 ls output:" >&2
+        echo "$S3_OUTPUT" | head -5 >&2
+
+        if echo "$S3_OUTPUT" | grep -q "\.whl"; then
             echo "hit"
         else
             echo "miss"
