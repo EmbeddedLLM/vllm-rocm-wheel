@@ -100,17 +100,8 @@ RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/d
 # Build vLLM
 # Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
 # Or use standard pip install from PyPI (image release mode)
-# Detect if building from a release branch and extract version for setuptools_scm
+# Version is auto-detected by setuptools_scm from git tags (GIT_REPO_CHECK ensures tags are available)
 RUN cd vllm \
-    && if echo "${VLLM_BRANCH}" | grep -q "^releases/"; then \
-           echo "Building from release branch: ${VLLM_BRANCH}"; \
-           VLLM_VERSION=$(echo "${VLLM_BRANCH}" | sed 's|^releases/v||; s|^releases/||'); \
-           echo "Extracted version: ${VLLM_VERSION}"; \
-           echo "Setting SETUPTOOLS_SCM_PRETEND_VERSION=${VLLM_VERSION}"; \
-           export SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_VERSION}"; \
-       else \
-           echo "Building from branch: ${VLLM_BRANCH} (using git version detection)"; \
-       fi \
     && if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
            echo "Building vLLM with custom wheels from /install"; \
            python3 -m pip install --find-links /install -r requirements/rocm.txt; \
