@@ -100,7 +100,7 @@ RUN if [ -f /tmp/pin_rocm_dependencies.py ] && [ -n "$(ls -A /install/*.whl 2>/d
 # Build vLLM
 # Use --find-links to search /install for custom ROCm wheels before PyPI (wheel release mode)
 # Or use standard pip install from PyPI (image release mode)
-# Version is auto-detected by setuptools_scm from git tags (GIT_REPO_CHECK ensures tags are available)
+# Version is auto-detected by setuptools_scm from git tags (requires .git mount)
 RUN cd vllm \
     && if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
            echo "Building vLLM with custom wheels from /install"; \
@@ -109,7 +109,11 @@ RUN cd vllm \
            echo "Building vLLM with standard PyPI packages"; \
            python3 -m pip install -r requirements/rocm.txt; \
        fi \
-    && python3 setup.py clean --all  \
+    && python3 setup.py clean --all
+
+# Build wheel with .git mounted for setuptools_scm version detection (like CUDA Dockerfile)
+RUN --mount=type=bind,source=.git,target=vllm/.git \
+    cd vllm \
     && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
 
 # collect_dependencies stage removed - we no longer collect PyPI dependencies
