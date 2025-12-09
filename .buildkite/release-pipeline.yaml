@@ -177,10 +177,8 @@ steps:
   #   ROCM_PYTHON_VERSION: Python version (default: 3.12)
   #   PYTORCH_ROCM_ARCH: GPU architectures (default: gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151)
   #   ROCM_VLLM_VERSION: vLLM version/tag (default: latest)
-  #   ROCM_REUSE_BASE_WHEELS: Skip base wheels build, use previous artifacts (default: false)
-  #   ROCM_PUBLISH_ONLY: Skip all builds, only publish (default: false)
-  #   ROCM_PREVIOUS_BUILD_ID: Build ID to reuse artifacts from (required if ROCM_REUSE_BASE_WHEELS or ROCM_PUBLISH_ONLY)
   #   ROCM_UPLOAD_WHEELS: Upload to S3 (default: false for nightly, true for releases)
+  #   ROCM_FORCE_REBUILD: Force rebuild base wheels, ignore S3 cache (default: false)
   #
   # =============================================================================
 
@@ -205,32 +203,6 @@ steps:
         key: "rocm-pytorch-rocm-arch"
         default: "gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151"
         hint: "Semicolon-separated GPU architectures"
-      - select: "Reuse Base Wheels"
-        key: "rocm-reuse-base-wheels"
-        default: "false"
-        options:
-          - label: "No - Build fresh base wheels"
-            value: "false"
-          - label: "Yes - Reuse from previous build"
-            value: "true"
-        hint: "Skip base wheel build and reuse artifacts from previous build"
-      - select: "Publish Only"
-        key: "rocm-publish-only"
-        default: "false"
-        options:
-          - label: "No - Build and optionally publish"
-            value: "false"
-          - label: "Yes - Skip builds, only publish"
-            value: "true"
-        hint: "Skip all builds, only run S3 upload step"
-      - text: "Previous Build UUID"
-        key: "rocm-previous-build-uuid"
-        required: false
-        hint: "Build UUID from previous build (click on any job in the build to find UUID in URL). Required if reuse-base-wheels or publish-only is true."
-      - text: "Previous Build Number"
-        key: "rocm-previous-build-number"
-        required: false
-        hint: "Build number from previous build (e.g., 10). Required for S3 Docker image download when reusing."
       - select: "Upload Wheels to S3"
         key: "rocm-upload-wheels"
         default: "false"
@@ -253,22 +225,6 @@ steps:
       # Set configuration and check cache
       - |
         set -euo pipefail
-
-        # Check if we should skip this job entirely
-        ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-}"
-        if [ -z "$${ROCM_REUSE_BASE_WHEELS}" ]; then
-          ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
-        fi
-        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-}"
-        if [ -z "$${ROCM_PUBLISH_ONLY}" ]; then
-          ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
-        fi
-
-        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] || [ "$${ROCM_PUBLISH_ONLY}" = "true" ]; then
-          echo "Skipping base wheel build (ROCM_REUSE_BASE_WHEELS=$${ROCM_REUSE_BASE_WHEELS}, ROCM_PUBLISH_ONLY=$${ROCM_PUBLISH_ONLY})"
-          echo "Will reuse artifacts from previous build"
-          exit 0
-        fi
 
         # Get values from meta-data (set by input step) or use defaults
         ROCM_VERSION="$$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '')"
@@ -402,7 +358,7 @@ steps:
     id: build-rocm-vllm-wheel
     depends_on:
       - step: build-rocm-base-wheels
-        allow_failure: true  # Allow to proceed even if Job 1 was skipped
+        allow_failure: false
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 120
@@ -411,46 +367,15 @@ steps:
       - |
         set -euo pipefail
 
-        # Check if we should skip this job (publish only mode)
-        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-}"
-        if [ -z "$${ROCM_PUBLISH_ONLY}" ]; then
-          ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
-        fi
-
-        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ]; then
-          echo "Skipping vLLM wheel build (ROCM_PUBLISH_ONLY=$${ROCM_PUBLISH_ONLY})"
-          echo "Will reuse artifacts from previous build in upload step"
-          exit 0
-        fi
-
-        # Get configuration from meta-data with defaults
-        ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
-        ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-false}"
-
-        # Get the previous build UUID (not build number - the --build flag requires UUID)
-        ROCM_PREVIOUS_BUILD_UUID="$$(buildkite-agent meta-data get rocm-previous-build-uuid 2>/dev/null || echo '')"
-        # Get the previous build number (for S3 Docker image path)
-        ROCM_PREVIOUS_BUILD_NUMBER="$$(buildkite-agent meta-data get rocm-previous-build-number 2>/dev/null || echo '')"
-
-        # Download wheel artifacts from Buildkite
-        if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_UUID}" ]; then
-          echo "Downloading wheel artifacts from previous build UUID: $${ROCM_PREVIOUS_BUILD_UUID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_UUID}"
-        else
-          echo "Downloading wheel artifacts from current build"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
-        fi
+        # Download wheel artifacts from current build
+        echo "Downloading wheel artifacts from current build"
+        buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
 
         # Download Docker image from S3 (too large for Buildkite artifacts)
         DOCKER_IMAGE_S3_PATH="$$(buildkite-agent meta-data get rocm-docker-image-s3-path 2>/dev/null || echo '')"
         if [ -z "$${DOCKER_IMAGE_S3_PATH}" ]; then
-          # Fallback to default path
-          if [ "$${ROCM_REUSE_BASE_WHEELS}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_NUMBER}" ]; then
-            # Use previous build number for S3 path (Docker images stored by build number)
-            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${ROCM_PREVIOUS_BUILD_NUMBER}/rocm-base-image.tar.gz"
-          else
-            DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
-          fi
+          # Fallback to default path based on current build
+          DOCKER_IMAGE_S3_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}/rocm-base-image.tar.gz"
         fi
         echo "Downloading Docker image from $${DOCKER_IMAGE_S3_PATH}"
         mkdir -p artifacts/rocm-docker-image
@@ -539,7 +464,7 @@ steps:
     id: upload-rocm-wheels
     depends_on:
       - step: build-rocm-vllm-wheel
-        allow_failure: true  # Allow to proceed even if Job 2 was skipped (publish only mode)
+        allow_failure: false
     agents:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 60
@@ -579,22 +504,10 @@ steps:
 
         echo "Upload enabled, proceeding..."
 
-        # Get configuration from meta-data with defaults
-        ROCM_PUBLISH_ONLY="$$(buildkite-agent meta-data get rocm-publish-only 2>/dev/null || echo '')"
-        ROCM_PUBLISH_ONLY="$${ROCM_PUBLISH_ONLY:-false}"
-
-        # Get the previous build UUID (required for Buildkite artifact download API)
-        ROCM_PREVIOUS_BUILD_UUID="$$(buildkite-agent meta-data get rocm-previous-build-uuid 2>/dev/null || echo '')"
-
-        if [ "$${ROCM_PUBLISH_ONLY}" = "true" ] && [ -n "$${ROCM_PREVIOUS_BUILD_UUID}" ]; then
-          echo "Downloading all artifacts from previous build UUID: $${ROCM_PREVIOUS_BUILD_UUID}"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_UUID}"
-          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" . --build "$${ROCM_PREVIOUS_BUILD_UUID}"
-        else
-          echo "Downloading artifacts from current build"
-          buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
-          buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" .
-        fi
+        # Download artifacts from current build
+        echo "Downloading artifacts from current build"
+        buildkite-agent artifact download "artifacts/rocm-base-wheels/*.whl" .
+        buildkite-agent artifact download "artifacts/rocm-vllm-wheel/*.whl" .
 
         # Run upload script
         bash .buildkite/scripts/upload-rocm-wheels.sh
