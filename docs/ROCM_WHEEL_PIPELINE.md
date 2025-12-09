@@ -58,7 +58,7 @@ Job 1 implements S3-based caching to avoid rebuilding base wheels when `Dockerfi
 
 The cache key is generated from:
 1. **SHA256 hash of `Dockerfile.rocm_base`** (first 16 characters)
-2. **Build arguments hash**: `ROCM_VERSION`, `PYTHON_VERSION`, `PYTORCH_BRANCH`, `TRITON_BRANCH`
+2. **Build arguments hash**: `ROCM_VERSION`, `PYTHON_VERSION`, `PYTORCH_ROCM_ARCH`
 
 ```bash
 # Example cache key
@@ -67,6 +67,8 @@ a1b2c3d4e5f6g7h8-i9j0k1l2
 └── Dockerfile     └── Build args
     hash               hash
 ```
+
+**Important**: The cache key includes GPU architectures (`PYTORCH_ROCM_ARCH`), so different architecture combinations will produce different cache keys.
 
 ### Cache Flow
 

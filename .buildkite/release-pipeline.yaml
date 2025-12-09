@@ -278,7 +278,7 @@ steps:
         export PYTHON_VERSION="$${PYTHON_VERSION:-3.12}"
 
         PYTORCH_ROCM_ARCH="$$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
-        PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
+        export PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
 
         # Check for force rebuild flag
         ROCM_FORCE_REBUILD="$${ROCM_FORCE_REBUILD:-}"
