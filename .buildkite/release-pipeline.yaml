@@ -435,6 +435,7 @@ steps:
           --build-arg REMOTE_VLLM=1 \
           --build-arg VLLM_REPO=https://github.com/vllm-project/vllm.git \
           --build-arg VLLM_BRANCH="$${ROCM_VLLM_VERSION}" \
+          --build-arg GIT_REPO_CHECK=1 \
           .
 
         echo "Built vLLM wheel:"

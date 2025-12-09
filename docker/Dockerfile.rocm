@@ -74,6 +74,14 @@ FROM fetch_vllm AS build_vllm
 ARG COMMON_WORKDIR
 ARG VLLM_BRANCH="main"
 
+# GIT_REPO_CHECK: Verify repo is clean and tags are available (for release builds)
+# This matches CUDA's Dockerfile behavior for proper version detection via setuptools_scm
+ARG GIT_REPO_CHECK=0
+RUN if [ "$GIT_REPO_CHECK" != "0" ]; then \
+        echo "Running repository checks..."; \
+        cd vllm && bash tools/check_repo.sh; \
+    fi
+
 # Only pin dependencies if custom wheels exist in /install (wheel release mode)
 RUN if [ -n "$(ls -A /install/*.whl 2>/dev/null)" ]; then \
         echo "Custom wheels found in /install - will pin dependencies"; \
