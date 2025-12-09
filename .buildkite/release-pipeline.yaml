@@ -240,7 +240,7 @@ steps:
           - label: "Yes - Upload to S3 (release)"
             value: "true"
 
-  # ROCm Job 1: Build ROCm Base Wheels
+  # ROCm Job 1: Build ROCm Base Wheels (with S3 caching)
   - label: ":rocm: Build ROCm Base Wheels"
     id: build-rocm-base-wheels
     depends_on:
@@ -250,12 +250,11 @@ steps:
       queue: vllm-rocm-wheel
     timeout_in_minutes: 240
     commands:
-      # Set configuration and build base image
-      # All in one block to preserve shell variables across commands
+      # Set configuration and check cache
       - |
         set -euo pipefail
 
-        # Check if we should skip this job
+        # Check if we should skip this job entirely
         ROCM_REUSE_BASE_WHEELS="$${ROCM_REUSE_BASE_WHEELS:-}"
         if [ -z "$${ROCM_REUSE_BASE_WHEELS}" ]; then
           ROCM_REUSE_BASE_WHEELS="$$(buildkite-agent meta-data get rocm-reuse-base-wheels 2>/dev/null || echo '')"
@@ -273,19 +272,27 @@ steps:
 
         # Get values from meta-data (set by input step) or use defaults
         ROCM_VERSION="$$(buildkite-agent meta-data get rocm-version 2>/dev/null || echo '')"
-        ROCM_VERSION="$${ROCM_VERSION:-7.1}"
+        export ROCM_VERSION="$${ROCM_VERSION:-7.1}"
 
         PYTHON_VERSION="$$(buildkite-agent meta-data get rocm-python-version 2>/dev/null || echo '')"
-        PYTHON_VERSION="$${PYTHON_VERSION:-3.12}"
+        export PYTHON_VERSION="$${PYTHON_VERSION:-3.12}"
 
         PYTORCH_ROCM_ARCH="$$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
         PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151}"
 
+        # Check for force rebuild flag
+        ROCM_FORCE_REBUILD="$${ROCM_FORCE_REBUILD:-}"
+        if [ -z "$${ROCM_FORCE_REBUILD}" ]; then
+          ROCM_FORCE_REBUILD="$$(buildkite-agent meta-data get rocm-force-rebuild 2>/dev/null || echo '')"
+        fi
+
         echo "========================================"
-        echo "Building ROCm base wheels with:"
+        echo "ROCm Base Wheels Build Configuration"
+        echo "========================================"
         echo "  ROCM_VERSION: $${ROCM_VERSION}"
         echo "  PYTHON_VERSION: $${PYTHON_VERSION}"
         echo "  PYTORCH_ROCM_ARCH: $${PYTORCH_ROCM_ARCH}"
+        echo "  ROCM_FORCE_REBUILD: $${ROCM_FORCE_REBUILD:-false}"
         echo "========================================"
 
         # Save resolved config for later jobs
@@ -293,53 +300,96 @@ steps:
         buildkite-agent meta-data set "rocm-python-version" "$${PYTHON_VERSION}"
         buildkite-agent meta-data set "rocm-pytorch-rocm-arch" "$${PYTORCH_ROCM_ARCH}"
 
-        # Build full base image (for later vLLM build)
-        DOCKER_BUILDKIT=1 docker buildx build \
-          --file docker/Dockerfile.rocm_base \
-          --tag rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} \
-          --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
-          --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
-          --load \
-          .
+        # Check S3 cache for pre-built wheels
+        CACHE_KEY=$$(.buildkite/scripts/cache-rocm-base-wheels.sh key)
+        CACHE_PATH=$$(.buildkite/scripts/cache-rocm-base-wheels.sh path)
+        echo ""
+        echo "Cache key: $${CACHE_KEY}"
+        echo "Cache path: $${CACHE_PATH}"
 
-        # Build debs stage for wheel extraction
-        DOCKER_BUILDKIT=1 docker buildx build \
-          --file docker/Dockerfile.rocm_base \
-          --tag rocm-base-debs:$${BUILDKITE_BUILD_NUMBER} \
-          --target debs \
-          --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
-          --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
-          --load \
-          .
+        # Save cache key for downstream jobs
+        buildkite-agent meta-data set "rocm-cache-key" "$${CACHE_KEY}"
 
-      # Extract wheels from Docker image
-      - |
-        mkdir -p artifacts/rocm-base-wheels
-        container_id=$$(docker create rocm-base-debs:$${BUILDKITE_BUILD_NUMBER})
-        docker cp $${container_id}:/app/debs/. artifacts/rocm-base-wheels/
-        docker rm $${container_id}
-        echo "Extracted base wheels:"
-        ls -lh artifacts/rocm-base-wheels/
+        CACHE_STATUS="miss"
+        if [ "$${ROCM_FORCE_REBUILD}" != "true" ]; then
+          CACHE_STATUS=$$(.buildkite/scripts/cache-rocm-base-wheels.sh check)
+        else
+          echo "Force rebuild requested, skipping cache check"
+        fi
 
-      # Export base Docker image for reuse in vLLM build
-      # Upload directly to S3 (too large for Buildkite's 5GB limit)
-      - |
-        mkdir -p artifacts/rocm-docker-image
-        docker save rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} | gzip > artifacts/rocm-docker-image/rocm-base-image.tar.gz
-        echo "Docker image size:"
-        ls -lh artifacts/rocm-docker-image/
+        if [ "$${CACHE_STATUS}" = "hit" ]; then
+          echo ""
+          echo "🎯 CACHE HIT! Downloading pre-built wheels..."
+          echo ""
+          .buildkite/scripts/cache-rocm-base-wheels.sh download
 
-        # Debug: show S3_BUCKET value
-        echo "S3_BUCKET from env: $${S3_BUCKET}"
+          # Set the S3 path for the cached Docker image (for Job 2 to download)
+          S3_ARTIFACT_PATH="s3://$${S3_BUCKET}/rocm/cache/$${CACHE_KEY}"
+          buildkite-agent meta-data set "rocm-docker-image-s3-path" "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
 
-        # Upload large Docker image to S3
-        # Note: S3_BUCKET should be set in cluster secrets or pipeline env
-        S3_ARTIFACT_PATH="s3://$${S3_BUCKET}/buildkite-artifacts/$${BUILDKITE_PIPELINE_SLUG}/$${BUILDKITE_BUILD_NUMBER}"
-        echo "Uploading Docker image to $${S3_ARTIFACT_PATH}/"
-        aws s3 cp artifacts/rocm-docker-image/rocm-base-image.tar.gz "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+          # Mark that we used cache (for Docker image handling)
+          buildkite-agent meta-data set "rocm-used-cache" "true"
 
-        # Save the S3 path for downstream jobs
-        buildkite-agent meta-data set "rocm-docker-image-s3-path" "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+          echo ""
+          echo "✅ Cache download complete. Skipping Docker build."
+          echo "Docker image will be downloaded from: $${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+        else
+          echo ""
+          echo "❌ CACHE MISS. Building from scratch..."
+          echo ""
+
+          # Build full base image (for later vLLM build)
+          DOCKER_BUILDKIT=1 docker buildx build \
+            --file docker/Dockerfile.rocm_base \
+            --tag rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} \
+            --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
+            --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
+            --load \
+            .
+
+          # Build debs stage for wheel extraction
+          DOCKER_BUILDKIT=1 docker buildx build \
+            --file docker/Dockerfile.rocm_base \
+            --tag rocm-base-debs:$${BUILDKITE_BUILD_NUMBER} \
+            --target debs \
+            --build-arg PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
+            --build-arg PYTHON_VERSION="$${PYTHON_VERSION}" \
+            --load \
+            .
+
+          # Extract wheels from Docker image
+          mkdir -p artifacts/rocm-base-wheels
+          container_id=$$(docker create rocm-base-debs:$${BUILDKITE_BUILD_NUMBER})
+          docker cp $${container_id}:/app/debs/. artifacts/rocm-base-wheels/
+          docker rm $${container_id}
+          echo "Extracted base wheels:"
+          ls -lh artifacts/rocm-base-wheels/
+
+          # Upload wheels to S3 cache for future builds
+          echo ""
+          echo "Uploading wheels to S3 cache..."
+          .buildkite/scripts/cache-rocm-base-wheels.sh upload
+
+          # Export base Docker image for reuse in vLLM build
+          mkdir -p artifacts/rocm-docker-image
+          docker save rocm/vllm-dev:base-$${BUILDKITE_BUILD_NUMBER} | gzip > artifacts/rocm-docker-image/rocm-base-image.tar.gz
+          echo "Docker image size:"
+          ls -lh artifacts/rocm-docker-image/
+
+          # Upload large Docker image to S3 (also cached by cache key)
+          S3_ARTIFACT_PATH="s3://$${S3_BUCKET}/rocm/cache/$${CACHE_KEY}"
+          echo "Uploading Docker image to $${S3_ARTIFACT_PATH}/"
+          aws s3 cp artifacts/rocm-docker-image/rocm-base-image.tar.gz "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+
+          # Save the S3 path for downstream jobs
+          buildkite-agent meta-data set "rocm-docker-image-s3-path" "$${S3_ARTIFACT_PATH}/rocm-base-image.tar.gz"
+
+          # Mark that we did NOT use cache
+          buildkite-agent meta-data set "rocm-used-cache" "false"
+
+          echo ""
+          echo "✅ Build complete. Wheels cached for future builds."
+        fi
     artifact_paths:
       - "artifacts/rocm-base-wheels/*.whl"
     env:
