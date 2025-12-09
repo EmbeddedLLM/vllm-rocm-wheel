@@ -172,11 +172,13 @@ steps:
   # ROCm Release Pipeline (x86_64 only)
   # =============================================================================
   #
+  # vLLM version is determined by the Buildkite checkout (like CUDA pipeline).
+  # To build a specific version, trigger the build from that branch/tag.
+  #
   # Environment variables for ROCm builds (set via Buildkite UI or schedule):
   #   ROCM_VERSION: ROCm version (default: 7.1)
   #   ROCM_PYTHON_VERSION: Python version (default: 3.12)
   #   PYTORCH_ROCM_ARCH: GPU architectures (default: gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151)
-  #   ROCM_VLLM_VERSION: vLLM version/tag (default: latest)
   #   ROCM_UPLOAD_WHEELS: Upload to S3 (default: false for nightly, true for releases)
   #   ROCM_FORCE_REBUILD: Force rebuild base wheels, ignore S3 cache (default: false)
   #
@@ -195,10 +197,6 @@ steps:
         key: "rocm-python-version"
         default: "3.12"
         hint: "Python version (e.g., 3.12)"
-      - text: "vLLM Version"
-        key: "rocm-vllm-version"
-        default: "latest"
-        hint: "vLLM tag (e.g., v0.11.2), branch (e.g., main), or 'latest'"
       - text: "GPU Architectures"
         key: "rocm-pytorch-rocm-arch"
         default: "gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1200;gfx1201;gfx1150;gfx1151"
@@ -395,46 +393,29 @@ steps:
         echo "Base wheels for vLLM build:"
         ls -lh docker/context/base-wheels/
 
-      # Resolve vLLM version and build wheel
+      # Build vLLM wheel from local checkout (like CUDA pipeline)
       - |
         set -euo pipefail
 
-        # Get configuration from meta-data with defaults
-        ROCM_VLLM_VERSION="$$(buildkite-agent meta-data get rocm-vllm-version 2>/dev/null || echo '')"
-        ROCM_VLLM_VERSION="$${ROCM_VLLM_VERSION:-latest}"
-
+        # Get GPU architectures from meta-data
         PYTORCH_ROCM_ARCH="$$(buildkite-agent meta-data get rocm-pytorch-rocm-arch 2>/dev/null || echo '')"
         PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}"
 
-        # Resolve "latest" to actual version
-        if [ "$${ROCM_VLLM_VERSION}" = "latest" ]; then
-          echo "Fetching latest vLLM release..."
-          ROCM_VLLM_VERSION=$$(curl -s https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name)
-          if [ "$${ROCM_VLLM_VERSION}" = "null" ] || [ -z "$${ROCM_VLLM_VERSION}" ]; then
-            echo "WARNING: Could not fetch latest release, using main"
-            ROCM_VLLM_VERSION="main"
-          fi
-        fi
-
         echo "========================================"
         echo "Building vLLM wheel with:"
-        echo "  ROCM_VLLM_VERSION: $${ROCM_VLLM_VERSION}"
+        echo "  BUILDKITE_COMMIT: $${BUILDKITE_COMMIT}"
+        echo "  BUILDKITE_BRANCH: $${BUILDKITE_BRANCH}"
         echo "  PYTORCH_ROCM_ARCH: $${PYTORCH_ROCM_ARCH}"
         echo "========================================"
 
-        # Save resolved version for later jobs
-        buildkite-agent meta-data set "rocm-resolved-vllm-version" "$${ROCM_VLLM_VERSION}"
-
-        # Build vLLM wheel
+        # Build vLLM wheel using local checkout (REMOTE_VLLM=0)
         DOCKER_BUILDKIT=1 docker build \
           --file docker/Dockerfile.rocm \
           --target export_vllm \
           --output type=local,dest=rocm-dist \
           --build-arg BASE_IMAGE=rocm/vllm-dev:base \
           --build-arg ARG_PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
-          --build-arg REMOTE_VLLM=1 \
-          --build-arg VLLM_REPO=https://github.com/vllm-project/vllm.git \
-          --build-arg VLLM_BRANCH="$${ROCM_VLLM_VERSION}" \
+          --build-arg REMOTE_VLLM=0 \
           --build-arg GIT_REPO_CHECK=1 \
           .
 
