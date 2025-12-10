@@ -409,7 +409,7 @@ steps:
         # Build vLLM wheel using local checkout (REMOTE_VLLM=0)
         DOCKER_BUILDKIT=1 docker build \
           --file docker/Dockerfile.rocm \
-          --target export_vllm \
+          --target export_vllm_wheel_release \
           --output type=local,dest=rocm-dist \
           --build-arg BASE_IMAGE="$${BASE_IMAGE_TAG}" \
           --build-arg ARG_PYTORCH_ROCM_ARCH="$${PYTORCH_ROCM_ARCH}" \
