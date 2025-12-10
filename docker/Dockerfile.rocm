@@ -129,7 +129,7 @@ RUN --mount=type=bind,source=.git,target=vllm/.git \
        else \
            echo "Image build: Using setuptools_scm auto-detection"; \
        fi \
-    && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
+    && python3 setup.py bdist_wheel --dist-dir=dist
 
 # collect_dependencies stage removed - we no longer collect PyPI dependencies
 # Users will get dependencies from public PyPI when installing
