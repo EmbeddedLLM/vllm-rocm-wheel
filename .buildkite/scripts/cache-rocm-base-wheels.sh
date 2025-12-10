@@ -15,9 +15,11 @@
 #
 # Environment variables:
 #   S3_BUCKET          - S3 bucket name (default: vllm-wheels)
-#   ROCM_VERSION       - ROCm version (affects cache key)
 #   PYTHON_VERSION     - Python version (affects cache key)
 #   PYTORCH_ROCM_ARCH  - GPU architectures (affects cache key)
+#
+# Note: ROCm version is determined by BASE_IMAGE in Dockerfile.rocm_base,
+#       so changes to ROCm version are captured by the Dockerfile hash.
 
 set -euo pipefail
 
@@ -36,7 +38,8 @@ generate_cache_key() {
 
     # Include key build args that affect the output
     # These should match the ARGs in Dockerfile.rocm_base that change the build output
-    local args_string="${ROCM_VERSION:-}|${PYTHON_VERSION:-}|${PYTORCH_ROCM_ARCH:-}"
+    # Note: ROCm version is determined by BASE_IMAGE in the Dockerfile, so it's captured by dockerfile_hash
+    local args_string="${PYTHON_VERSION:-}|${PYTORCH_ROCM_ARCH:-}"
     local args_hash=$(echo "$args_string" | sha256sum | cut -c1-8)
 
     echo "${dockerfile_hash}-${args_hash}"
@@ -50,7 +53,6 @@ case "${1:-}" in
         echo "Checking cache for key: ${CACHE_KEY}" >&2
         echo "Cache path: ${CACHE_PATH}" >&2
         echo "Variables used in cache key:" >&2
-        echo "  ROCM_VERSION: ${ROCM_VERSION:-<not set>}" >&2
         echo "  PYTHON_VERSION: ${PYTHON_VERSION:-<not set>}" >&2
         echo "  PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH:-<not set>}" >&2
 
