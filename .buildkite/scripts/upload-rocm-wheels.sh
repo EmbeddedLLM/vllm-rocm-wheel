@@ -40,8 +40,9 @@ echo "========================================"
 has_new_python=$($PYTHON -c "print(1 if __import__('sys').version_info >= (3,12) else 0)" 2>/dev/null || echo 0)
 if [[ "$has_new_python" -eq 0 ]]; then
     # Use new python from docker
+    # Use --user to ensure files are created with correct ownership (not root)
     docker pull python:3-slim
-    PYTHON="docker run --rm -v $(pwd):/app -w /app python:3-slim python3"
+    PYTHON="docker run --rm --user $(id -u):$(id -g) -v $(pwd):/app -w /app python:3-slim python3"
 fi
 
 echo "Using python interpreter: $PYTHON"
