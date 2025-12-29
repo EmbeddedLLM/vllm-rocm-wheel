@@ -112,7 +112,8 @@ RUN --mount=type=bind,source=.git,target=vllm/.git \
     && echo "Detected vLLM version: ${VLLM_VERSION}" \
     && echo "${VLLM_VERSION}" > /tmp/vllm_version.txt
 
-# TODO: try to make those packages distributed on pypi as well
+# Remark: Added this step as safeguard, developers should
+#       try to make those packages distributed on pypi as well
 # Remove git-based package dependencies (uv doesn't handle git+ URLs well)
 # Extra: pip install is able to handle git+ URLs, but uv doesn't.
 RUN echo "Removing git-based packages from requirements files..." \
